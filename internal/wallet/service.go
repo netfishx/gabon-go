@@ -24,6 +24,29 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, q: db.New(pool)}
 }
 
+// queries 返回事务作用域的查询集；tx 为 nil 时直连池。
+func (s *Service) queries(tx pgx.Tx) *db.Queries {
+	if tx == nil {
+		return s.q
+	}
+	return s.q.WithTx(tx)
+}
+
+// writeLedger 统一的账本落笔：balance_after = 变更后总额（可用+冻结）。
+// Credit/Debit/SettleFrozen 共用；Freeze/Unfreeze 不落笔（ADR-0006）。
+func writeLedger(ctx context.Context, q *db.Queries, customerID int64, typ db.TransactionType, signedAmount int64, w db.Wallet, refID *int64) error {
+	if _, err := q.InsertTransaction(ctx, db.InsertTransactionParams{
+		CustomerID:   customerID,
+		Type:         typ,
+		Amount:       signedAmount,
+		BalanceAfter: w.Available + w.Frozen,
+		RefID:        refID,
+	}); err != nil {
+		return fmt.Errorf("insert transaction: %w", err)
+	}
+	return nil
+}
+
 // ListTransactions 按流水号降序游标分页。cursor=0 表示第一页；
 // 返回的 next=0 表示没有更多。
 func (s *Service) ListTransactions(ctx context.Context, customerID, cursor int64, limit int32) (items []db.Transaction, next int64, err error) {

@@ -47,29 +47,32 @@ func (s *Service) DebitTx(ctx context.Context, tx pgx.Tx, p DebitParams) error {
 	if err != nil {
 		return fmt.Errorf("debit wallet: %w", err)
 	}
-	if _, err := q.InsertTransaction(ctx, db.InsertTransactionParams{
-		CustomerID:   p.CustomerID,
-		Type:         p.Type,
-		Amount:       -p.Amount,
-		BalanceAfter: w.Available + w.Frozen,
-		RefID:        p.RefID,
-	}); err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
-	}
-	return nil
+	return writeLedger(ctx, q, p.CustomerID, p.Type, -p.Amount, w, p.RefID)
 }
 
 // Freeze 可用→冻结的内部转移：总额不变，不写流水（ADR-0006）。
 func (s *Service) Freeze(ctx context.Context, customerID, amount int64) error {
+	return s.FreezeTx(ctx, nil, customerID, amount)
+}
+
+// FreezeTx 供消费方（如提现建单）在自身事务内冻结；tx 为 nil 时直连池。
+func (s *Service) FreezeTx(ctx context.Context, tx pgx.Tx, customerID, amount int64) error {
+	q := s.queries(tx)
 	return transfer(amount, func() (int64, error) {
-		return s.q.FreezeWallet(ctx, db.FreezeWalletParams{CustomerID: customerID, Available: amount})
+		return q.FreezeWallet(ctx, db.FreezeWalletParams{CustomerID: customerID, Available: amount})
 	})
 }
 
 // Unfreeze 冻结→可用的内部转移：总额不变，不写流水。
 func (s *Service) Unfreeze(ctx context.Context, customerID, amount int64) error {
+	return s.UnfreezeTx(ctx, nil, customerID, amount)
+}
+
+// UnfreezeTx 供消费方（如提现驳回）在自身事务内解冻；tx 为 nil 时直连池。
+func (s *Service) UnfreezeTx(ctx context.Context, tx pgx.Tx, customerID, amount int64) error {
+	q := s.queries(tx)
 	return transfer(amount, func() (int64, error) {
-		return s.q.UnfreezeWallet(ctx, db.UnfreezeWalletParams{CustomerID: customerID, Available: amount})
+		return q.UnfreezeWallet(ctx, db.UnfreezeWalletParams{CustomerID: customerID, Available: amount})
 	})
 }
 
@@ -118,14 +121,5 @@ func (s *Service) SettleFrozenTx(ctx context.Context, tx pgx.Tx, p SettleParams)
 	if err != nil {
 		return fmt.Errorf("settle frozen: %w", err)
 	}
-	if _, err := q.InsertTransaction(ctx, db.InsertTransactionParams{
-		CustomerID:   p.CustomerID,
-		Type:         p.Type,
-		Amount:       -p.Amount,
-		BalanceAfter: w.Available + w.Frozen,
-		RefID:        p.RefID,
-	}); err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
-	}
-	return nil
+	return writeLedger(ctx, q, p.CustomerID, p.Type, -p.Amount, w, p.RefID)
 }

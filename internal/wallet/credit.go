@@ -61,14 +61,5 @@ func (s *Service) CreditTx(ctx context.Context, tx pgx.Tx, p CreditParams) error
 	if err != nil {
 		return fmt.Errorf("credit wallet: %w", err)
 	}
-	if _, err := q.InsertTransaction(ctx, db.InsertTransactionParams{
-		CustomerID:   p.CustomerID,
-		Type:         p.Type,
-		Amount:       p.Amount,
-		BalanceAfter: w.Available + w.Frozen,
-		RefID:        p.RefID,
-	}); err != nil {
-		return fmt.Errorf("insert transaction: %w", err)
-	}
-	return nil
+	return writeLedger(ctx, q, p.CustomerID, p.Type, p.Amount, w, p.RefID)
 }
