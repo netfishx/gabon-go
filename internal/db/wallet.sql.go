@@ -136,6 +136,48 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 	return i, err
 }
 
+const listTransactions = `-- name: ListTransactions :many
+SELECT id, customer_id, type, amount, balance_after, ref_id, created_at FROM transactions
+WHERE customer_id = $1
+  AND ($2::bigint = 0 OR id < $2)
+ORDER BY id DESC
+LIMIT $3
+`
+
+type ListTransactionsParams struct {
+	CustomerID int64
+	Cursor     int64
+	RowLimit   int32
+}
+
+func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsParams) ([]Transaction, error) {
+	rows, err := q.db.Query(ctx, listTransactions, arg.CustomerID, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Transaction
+	for rows.Next() {
+		var i Transaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.Type,
+			&i.Amount,
+			&i.BalanceAfter,
+			&i.RefID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const settleFrozenWallet = `-- name: SettleFrozenWallet :one
 UPDATE wallets
 SET frozen = frozen - $2, updated_at = now()

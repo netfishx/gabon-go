@@ -30,6 +30,7 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/me/password", h.handleChangePassword)
 		r.Post("/auth/refresh", h.handleRefresh)
 		r.Get("/wallet", h.handleWallet)
+		r.Get("/wallet/transactions", h.handleWalletTransactions)
 	})
 	return r
 }

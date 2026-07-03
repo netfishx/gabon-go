@@ -41,3 +41,10 @@ UPDATE wallets
 SET frozen = frozen - $2, updated_at = now()
 WHERE customer_id = $1 AND frozen >= $2
 RETURNING *;
+
+-- name: ListTransactions :many
+SELECT * FROM transactions
+WHERE customer_id = sqlc.arg(customer_id)
+  AND (sqlc.arg(cursor)::bigint = 0 OR id < sqlc.arg(cursor))
+ORDER BY id DESC
+LIMIT sqlc.arg(row_limit);
