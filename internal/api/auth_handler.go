@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
@@ -58,4 +59,36 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toCustomerResponse(c))
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token    string           `json:"token"`
+	Customer customerResponse `json:"customer"`
+}
+
+func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	c, err := h.Customers.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	token, err := h.Tokens.Issue(c.ID, auth.AudienceCustomer, c.PasswordChangedAt.Time)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{Token: token, Customer: toCustomerResponse(c)})
+}
+
+func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, toCustomerResponse(customerFrom(r.Context())))
 }

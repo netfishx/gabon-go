@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/go-chi/chi/v5 v5.3.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-cmp v0.7.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/pressly/goose/v3 v3.27.2

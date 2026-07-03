@@ -8,16 +8,24 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 )
 
 type Handler struct {
 	Customers *customer.Service
+	Tokens    *auth.TokenIssuer
 }
 
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/auth/register", h.handleRegister)
+	r.Post("/auth/login", h.handleLogin)
+
+	r.Group(func(r chi.Router) {
+		r.Use(h.requireCustomer)
+		r.Get("/me", h.handleMe)
+	})
 	return r
 }
 

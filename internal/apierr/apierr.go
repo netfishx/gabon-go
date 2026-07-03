@@ -13,8 +13,12 @@ const (
 	CodeInvalidArgument = "COMMON_INVALID_ARGUMENT"
 	CodeInternal        = "COMMON_INTERNAL"
 
+	CodeAuthBadCredentials = "AUTH_BAD_CREDENTIALS"
+	CodeAuthUnauthorized   = "AUTH_UNAUTHORIZED"
+
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
+	CodeCustomerBanned            = "CUSTOMER_BANNED"
 )
 
 type Error struct {

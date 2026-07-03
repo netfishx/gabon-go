@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/api"
+	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/customer"
 )
@@ -23,6 +24,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 
 	apiHandler := &api.Handler{
 		Customers: customer.NewService(pool),
+		Tokens:    auth.NewTokenIssuer(cfg.JWTSecret),
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 	r.Route("/admin/v1", func(r chi.Router) {})
