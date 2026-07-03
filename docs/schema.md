@@ -203,7 +203,8 @@ periodic_task_progress  id, customer_id, task_id, period_key text,      -- '2026
                         UNIQUE(customer_id, task_id, period_key)
 
 task_claims             id, customer_id, task_id, status claim_status,
-                        proof_text, proof_images text[] CHECK(1..9),    -- 须本人上传的存储路径
+                        proof_text, proof_images text[],                -- 须本人上传的存储路径
+                                                                        -- CHECK：上界恒 ≤9；claimed/expired 允许空，提交后各状态 ≥1
                         reward_base bigint, reward_granted bigint,      -- 倍率前/后
                         expires_at,                                     -- 领取时任务 ends_at 的快照
                         claimed_at, submitted_at,

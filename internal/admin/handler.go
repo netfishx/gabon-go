@@ -1,0 +1,99 @@
+package admin
+
+import (
+	"context"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/auth"
+	"github.com/netfishx/gabon-go/internal/db"
+)
+
+// Handler 后台面 /admin/v1 的 handler 集。
+type Handler struct {
+	Admins *Service
+	Tokens *auth.TokenIssuer
+}
+
+// Routes 组装后台面路由。
+func (h *Handler) Routes() chi.Router {
+	r := chi.NewRouter()
+	r.Post("/auth/login", h.handleLogin)
+
+	r.Group(func(r chi.Router) {
+		r.Use(h.requireAdmin)
+		r.Get("/me", h.handleMe)
+	})
+	return r
+}
+
+type ctxKey int
+
+const ctxKeyAdmin ctxKey = iota
+
+func adminFrom(ctx context.Context) *db.Admin {
+	a, _ := ctx.Value(ctxKeyAdmin).(*db.Admin)
+	return a
+}
+
+// requireAdmin 后台面鉴权：共享序列见 auth.SubjectMiddleware。
+func (h *Handler) requireAdmin(next http.Handler) http.Handler {
+	m := auth.SubjectMiddleware[*db.Admin]{
+		Tokens:   h.Tokens,
+		Audience: auth.AudienceAdmin,
+		Load:     h.Admins.GetByID,
+		Stamp: func(a *db.Admin) int64 {
+			return auth.PasswordStamp(a.PasswordChangedAt.Time)
+		},
+		Check: func(a *db.Admin) error {
+			if a.Status == db.AdminStatusDisabled {
+				return apierr.New(http.StatusForbidden, apierr.CodeAdminDisabled, "admin account is disabled")
+			}
+			return nil
+		},
+		Inject: func(ctx context.Context, a *db.Admin) context.Context {
+			return context.WithValue(ctx, ctxKeyAdmin, a)
+		},
+	}
+	return m.Middleware(next)
+}
+
+type loginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type adminResponse struct {
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func toAdminResponse(a *db.Admin) adminResponse {
+	return adminResponse{Username: a.Username, Role: string(a.Role), CreatedAt: a.CreatedAt.Time}
+}
+
+func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if !apierr.DecodeJSON(w, r, &req) {
+		return
+	}
+	a, err := h.Admins.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	token, err := h.Tokens.Issue(a.ID, auth.AudienceAdmin, a.PasswordChangedAt.Time)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	apierr.WriteJSON(w, http.StatusOK, map[string]any{"token": token, "admin": toAdminResponse(a)})
+}
+
+func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
+	apierr.WriteJSON(w, http.StatusOK, toAdminResponse(adminFrom(r.Context())))
+}
