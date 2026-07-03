@@ -18,6 +18,30 @@ func (q *Queries) CreateWallet(ctx context.Context, customerID int64) error {
 	return err
 }
 
+const creditWallet = `-- name: CreditWallet :one
+UPDATE wallets
+SET available = available + $2, updated_at = now()
+WHERE customer_id = $1
+RETURNING customer_id, available, frozen, updated_at
+`
+
+type CreditWalletParams struct {
+	CustomerID int64
+	Available  int64
+}
+
+func (q *Queries) CreditWallet(ctx context.Context, arg CreditWalletParams) (Wallet, error) {
+	row := q.db.QueryRow(ctx, creditWallet, arg.CustomerID, arg.Available)
+	var i Wallet
+	err := row.Scan(
+		&i.CustomerID,
+		&i.Available,
+		&i.Frozen,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWallet = `-- name: GetWallet :one
 SELECT customer_id, available, frozen, updated_at FROM wallets WHERE customer_id = $1
 `
@@ -32,4 +56,57 @@ func (q *Queries) GetWallet(ctx context.Context, customerID int64) (Wallet, erro
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const insertTransaction = `-- name: InsertTransaction :one
+INSERT INTO transactions (customer_id, type, amount, balance_after, ref_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, customer_id, type, amount, balance_after, ref_id, created_at
+`
+
+type InsertTransactionParams struct {
+	CustomerID   int64
+	Type         TransactionType
+	Amount       int64
+	BalanceAfter int64
+	RefID        *int64
+}
+
+func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionParams) (Transaction, error) {
+	row := q.db.QueryRow(ctx, insertTransaction,
+		arg.CustomerID,
+		arg.Type,
+		arg.Amount,
+		arg.BalanceAfter,
+		arg.RefID,
+	)
+	var i Transaction
+	err := row.Scan(
+		&i.ID,
+		&i.CustomerID,
+		&i.Type,
+		&i.Amount,
+		&i.BalanceAfter,
+		&i.RefID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const transactionRefExists = `-- name: TransactionRefExists :one
+SELECT EXISTS (
+    SELECT 1 FROM transactions WHERE type = $1 AND ref_id = $2
+)
+`
+
+type TransactionRefExistsParams struct {
+	Type  TransactionType
+	RefID *int64
+}
+
+func (q *Queries) TransactionRefExists(ctx context.Context, arg TransactionRefExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, transactionRefExists, arg.Type, arg.RefID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
