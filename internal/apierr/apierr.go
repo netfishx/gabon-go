@@ -13,7 +13,8 @@ const (
 	CodeInvalidArgument = "COMMON_INVALID_ARGUMENT"
 	CodeInternal        = "COMMON_INTERNAL"
 
-	CodeCustomerUsernameTaken = "CUSTOMER_USERNAME_TAKEN"
+	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
+	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 )
 
 type Error struct {

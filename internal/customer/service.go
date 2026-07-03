@@ -31,8 +31,23 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, q: db.New(pool)}
 }
 
-// Register 注册客户：同一事务内写入客户与零余额钱包。
-func (s *Service) Register(ctx context.Context, username, password string) (*db.Customer, error) {
+// Register 注册客户：同一事务内写入客户（含邀请关系与祖先路径）与零余额钱包，
+// 并为邀请人总邀请数 +1（注册即计，不论被邀请人是否有效）。
+func (s *Service) Register(ctx context.Context, username, password, inviteCode string) (*db.Customer, error) {
+	var inviterID *int64
+	ancestors := []int64{}
+	if inviteCode != "" {
+		inviter, err := s.q.GetCustomerByInviteCode(ctx, inviteCode)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, apierr.New(http.StatusBadRequest, apierr.CodeCustomerInviteCodeInvalid, "invite code does not exist")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("resolve invite code: %w", err)
+		}
+		inviterID = &inviter.ID
+		ancestors = append(inviter.Ancestors, inviter.ID)
+	}
+
 	passwordHash, err := auth.HashPassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -43,7 +58,7 @@ func (s *Service) Register(ctx context.Context, username, password string) (*db.
 		if err != nil {
 			return nil, err
 		}
-		inviteCode, err := newInviteCode()
+		newCode, err := newInviteCode()
 		if err != nil {
 			return nil, err
 		}
@@ -55,14 +70,20 @@ func (s *Service) Register(ctx context.Context, username, password string) (*db.
 				PublicID:     publicID,
 				Username:     username,
 				PasswordHash: passwordHash,
-				InviteCode:   inviteCode,
-				Ancestors:    []int64{},
+				InviteCode:   newCode,
+				InviterID:    inviterID,
+				Ancestors:    ancestors,
 			})
 			if err != nil {
 				return err
 			}
 			if err := q.CreateWallet(ctx, c.ID); err != nil {
 				return err
+			}
+			if inviterID != nil {
+				if err := q.IncrementInviteCount(ctx, *inviterID); err != nil {
+					return err
+				}
 			}
 			created = c
 			return nil

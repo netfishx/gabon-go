@@ -52,7 +52,7 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c, err := h.Customers.Register(r.Context(), req.Username, req.Password)
+	c, err := h.Customers.Register(r.Context(), req.Username, req.Password, req.InviteCode)
 	if err != nil {
 		apierr.Write(w, err)
 		return

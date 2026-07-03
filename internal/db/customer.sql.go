@@ -63,3 +63,49 @@ func (q *Queries) CreateCustomer(ctx context.Context, arg CreateCustomerParams) 
 	)
 	return i, err
 }
+
+const getCustomerByInviteCode = `-- name: GetCustomerByInviteCode :one
+SELECT id, public_id, username, password_hash, password_changed_at, name, phone, email, avatar_path, signature, invite_code, inviter_id, ancestors, valid_at, vip_level, status, withdrawal_password_hash, video_count, invite_count, follower_count, following_count, last_login_at, deleted_at, created_at, updated_at FROM customers WHERE invite_code = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetCustomerByInviteCode(ctx context.Context, inviteCode string) (Customer, error) {
+	row := q.db.QueryRow(ctx, getCustomerByInviteCode, inviteCode)
+	var i Customer
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.PasswordChangedAt,
+		&i.Name,
+		&i.Phone,
+		&i.Email,
+		&i.AvatarPath,
+		&i.Signature,
+		&i.InviteCode,
+		&i.InviterID,
+		&i.Ancestors,
+		&i.ValidAt,
+		&i.VipLevel,
+		&i.Status,
+		&i.WithdrawalPasswordHash,
+		&i.VideoCount,
+		&i.InviteCount,
+		&i.FollowerCount,
+		&i.FollowingCount,
+		&i.LastLoginAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const incrementInviteCount = `-- name: IncrementInviteCount :exec
+UPDATE customers SET invite_count = invite_count + 1, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, incrementInviteCount, id)
+	return err
+}
