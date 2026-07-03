@@ -41,7 +41,7 @@ func toCustomerResponse(c *db.Customer) customerResponse {
 
 func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
-	if !decodeJSON(w, r, &req) {
+	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
 	if !usernamePattern.MatchString(req.Username) {
@@ -58,7 +58,7 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, toCustomerResponse(c))
+	apierr.WriteJSON(w, http.StatusCreated, toCustomerResponse(c))
 }
 
 type loginRequest struct {
@@ -73,7 +73,7 @@ type loginResponse struct {
 
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
-	if !decodeJSON(w, r, &req) {
+	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
 	c, err := h.Customers.Login(r.Context(), req.Username, req.Password)
@@ -86,11 +86,11 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, loginResponse{Token: token, Customer: toCustomerResponse(c)})
+	apierr.WriteJSON(w, http.StatusOK, loginResponse{Token: token, Customer: toCustomerResponse(c)})
 }
 
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, toCustomerResponse(customerFrom(r.Context())))
+	apierr.WriteJSON(w, http.StatusOK, toCustomerResponse(customerFrom(r.Context())))
 }
 
 type changePasswordRequest struct {
@@ -100,7 +100,7 @@ type changePasswordRequest struct {
 
 func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	var req changePasswordRequest
-	if !decodeJSON(w, r, &req) {
+	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
 	if len(req.NewPassword) < passwordMinLen || len(req.NewPassword) > passwordMaxLen {
@@ -122,5 +122,5 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	apierr.WriteJSON(w, http.StatusOK, map[string]string{"token": token})
 }

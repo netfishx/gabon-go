@@ -8,6 +8,8 @@ import (
 	"net/http"
 )
 
+// 注：本包同时承载统一响应写出（WriteJSON/DecodeJSON），见 docs/skeleton.md 对 apierr 的职责定义。
+
 // 错误码常量：大写蛇形，"域_语义"，各域按前缀自行扩展。
 const (
 	CodeInvalidArgument = "COMMON_INVALID_ARGUMENT"
@@ -40,6 +42,27 @@ func New(status int, code, message string) *Error {
 // InvalidArgument 400 参数错误的便捷构造。
 func InvalidArgument(message string) *Error {
 	return New(http.StatusBadRequest, CodeInvalidArgument, message)
+}
+
+// Unauthorized 401 未认证的便捷构造。
+func Unauthorized() *Error {
+	return New(http.StatusUnauthorized, CodeAuthUnauthorized, "authentication required")
+}
+
+// WriteJSON 成功响应：2xx + data 直出（status-first，无 envelope）。api/admin 两面共用。
+func WriteJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// DecodeJSON 解码请求体；失败时写统一 400 并返回 false。
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		Write(w, InvalidArgument("malformed JSON body"))
+		return false
+	}
+	return true
 }
 
 // Write 将错误写为统一 JSON 响应；非 *Error 一律 500 且不泄露内部信息。

@@ -44,6 +44,10 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) erro
 	if _, err := s.q.CreateAdmin(ctx, db.CreateAdminParams{
 		Username: username, PasswordHash: hash, Role: db.AdminRoleAdmin,
 	}); err != nil {
+		// count-then-create 与并发启动的实例竞态时，用户名冲突即"对方已完成引导"，幂等成功
+		if db.UniqueViolationConstraint(err) == "admins_username_key" {
+			return nil
+		}
 		return fmt.Errorf("create bootstrap admin: %w", err)
 	}
 	return nil

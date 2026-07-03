@@ -2,7 +2,9 @@ package auth
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -51,6 +53,15 @@ func (i *TokenIssuer) Issue(subjectID int64, audience string, passwordChangedAt 
 		return "", fmt.Errorf("sign token: %w", err)
 	}
 	return signed, nil
+}
+
+// FromRequest 从 Authorization: Bearer 头提取并校验 token，双面中间件共用。
+func (i *TokenIssuer) FromRequest(r *http.Request, audience string) (subjectID, passwordStamp int64, err error) {
+	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || raw == "" {
+		return 0, 0, fmt.Errorf("missing bearer token")
+	}
+	return i.Parse(raw, audience)
 }
 
 // Parse 校验签名、有效期与受众，返回主体 id 与密码戳。

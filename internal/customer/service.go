@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
@@ -16,11 +15,8 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
-const (
-	pgUniqueViolation = "23505"
-	// 短码碰撞重试上限；命中即视为随机源异常
-	maxCodeRetries = 5
-)
+// maxCodeRetries 短码碰撞重试上限；命中即视为随机源异常。
+const maxCodeRetries = 5
 
 // Service 客户域服务，直连 sqlc 生成的查询。
 type Service struct {
@@ -94,14 +90,11 @@ func (s *Service) Register(ctx context.Context, username, password, inviteCode s
 			return &created, nil
 		}
 
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			switch pgErr.ConstraintName {
-			case "customers_username_key":
-				return nil, apierr.New(http.StatusConflict, apierr.CodeCustomerUsernameTaken, "username already taken")
-			case "customers_public_id_key", "customers_invite_code_key":
-				continue // 短码碰撞，重新生成
-			}
+		switch db.UniqueViolationConstraint(err) {
+		case "customers_username_key":
+			return nil, apierr.New(http.StatusConflict, apierr.CodeCustomerUsernameTaken, "username already taken")
+		case "customers_public_id_key", "customers_invite_code_key":
+			continue // 短码碰撞，重新生成
 		}
 		return nil, fmt.Errorf("register customer: %w", err)
 	}
