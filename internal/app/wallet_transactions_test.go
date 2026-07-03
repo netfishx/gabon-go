@@ -117,6 +117,33 @@ func TestWalletTransactionsEmptyAndGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("exact_multiple_no_trailing_cursor", func(t *testing.T) {
+		// P2 回归：剩余行数恰好等于 limit 时不得再发 next_cursor（避免客户端多拉空页）
+		var cid int64
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT id FROM customers WHERE username = $1`, username).Scan(&cid); err != nil {
+			t.Fatalf("query customer id: %v", err)
+		}
+		svc := wallet.NewService(testPool)
+		for range 4 {
+			if err := svc.Credit(context.Background(), wallet.CreditParams{
+				CustomerID: cid, Type: db.TransactionTypeRecharge, Amount: 10,
+			}); err != nil {
+				t.Fatalf("seed credit: %v", err)
+			}
+		}
+		resp, body := getJSON(t, "/api/v1/wallet/transactions?limit=4", token)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d", resp.StatusCode)
+		}
+		if items, _ := body["items"].([]any); len(items) != 4 {
+			t.Fatalf("items = %d, want 4", len(items))
+		}
+		if cur, has := body["next_cursor"]; has {
+			t.Errorf("next_cursor = %v present on exact-multiple final page, want absent", cur)
+		}
+	})
+
 	t.Run("limit_clamped", func(t *testing.T) {
 		resp, _ := getJSON(t, "/api/v1/wallet/transactions?limit=99999", token)
 		if resp.StatusCode != http.StatusOK {

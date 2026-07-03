@@ -25,14 +25,9 @@ type CreditParams struct {
 
 // Credit 在自管事务内入账。
 func (s *Service) Credit(ctx context.Context, p CreditParams) error {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		return s.CreditTx(ctx, tx, p)
 	})
-	// 并发撞唯一约束在 COMMIT 前以约束错误浮出，归一为已发放语义
-	if db.UniqueViolationConstraint(err) == "transactions_type_ref_key" {
-		return ErrAlreadyGranted
-	}
-	return err
 }
 
 // CreditTx 在调用方事务内入账：原子增加可用余额，同事务落一条正金额流水。
@@ -56,10 +51,18 @@ func (s *Service) CreditTx(ctx context.Context, tx pgx.Tx, p CreditParams) error
 	}
 
 	w, err := q.CreditWallet(ctx, db.CreditWalletParams{
-		CustomerID: p.CustomerID, Available: p.Amount,
+		CustomerID: p.CustomerID, Amount: p.Amount,
 	})
 	if err != nil {
 		return fmt.Errorf("credit wallet: %w", err)
 	}
-	return writeLedger(ctx, q, p.CustomerID, p.Type, p.Amount, w, p.RefID)
+	// 竞态路径：双方都越过 exists-check 时，落笔撞唯一约束——就地归一为已发放语义，
+	// 消费方在自身事务内也能以 errors.Is(ErrAlreadyGranted) 识别（事务此时已 aborted，须整体回滚）
+	if err := writeLedger(ctx, q, p.CustomerID, p.Type, p.Amount, w, p.RefID); err != nil {
+		if db.UniqueViolationConstraint(err) == "transactions_type_ref_key" {
+			return ErrAlreadyGranted
+		}
+		return err
+	}
+	return nil
 }

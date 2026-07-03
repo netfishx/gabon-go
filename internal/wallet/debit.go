@@ -39,7 +39,7 @@ func (s *Service) DebitTx(ctx context.Context, tx pgx.Tx, p DebitParams) error {
 	q := s.q.WithTx(tx)
 
 	w, err := q.DebitWallet(ctx, db.DebitWalletParams{
-		CustomerID: p.CustomerID, Available: p.Amount,
+		CustomerID: p.CustomerID, Amount: p.Amount,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return insufficient()
@@ -59,7 +59,7 @@ func (s *Service) Freeze(ctx context.Context, customerID, amount int64) error {
 func (s *Service) FreezeTx(ctx context.Context, tx pgx.Tx, customerID, amount int64) error {
 	q := s.queries(tx)
 	return transfer(amount, func() (int64, error) {
-		return q.FreezeWallet(ctx, db.FreezeWalletParams{CustomerID: customerID, Available: amount})
+		return q.FreezeWallet(ctx, db.FreezeWalletParams{CustomerID: customerID, Amount: amount})
 	})
 }
 
@@ -72,7 +72,7 @@ func (s *Service) Unfreeze(ctx context.Context, customerID, amount int64) error 
 func (s *Service) UnfreezeTx(ctx context.Context, tx pgx.Tx, customerID, amount int64) error {
 	q := s.queries(tx)
 	return transfer(amount, func() (int64, error) {
-		return q.UnfreezeWallet(ctx, db.UnfreezeWalletParams{CustomerID: customerID, Available: amount})
+		return q.UnfreezeWallet(ctx, db.UnfreezeWalletParams{CustomerID: customerID, Amount: amount})
 	})
 }
 
@@ -113,7 +113,7 @@ func (s *Service) SettleFrozenTx(ctx context.Context, tx pgx.Tx, p SettleParams)
 	q := s.q.WithTx(tx)
 
 	w, err := q.SettleFrozenWallet(ctx, db.SettleFrozenWalletParams{
-		CustomerID: p.CustomerID, Frozen: p.Amount,
+		CustomerID: p.CustomerID, Amount: p.Amount,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return insufficient()

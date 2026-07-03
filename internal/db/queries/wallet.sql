@@ -6,7 +6,7 @@ SELECT * FROM wallets WHERE customer_id = $1;
 
 -- name: CreditWallet :one
 UPDATE wallets
-SET available = available + $2, updated_at = now()
+SET available = available + sqlc.arg(amount), updated_at = now()
 WHERE customer_id = $1
 RETURNING *;
 
@@ -22,24 +22,24 @@ SELECT EXISTS (
 
 -- name: DebitWallet :one
 UPDATE wallets
-SET available = available - $2, updated_at = now()
-WHERE customer_id = $1 AND available >= $2
+SET available = available - sqlc.arg(amount), updated_at = now()
+WHERE customer_id = $1 AND available >= sqlc.arg(amount)
 RETURNING *;
 
 -- name: FreezeWallet :execrows
 UPDATE wallets
-SET available = available - $2, frozen = frozen + $2, updated_at = now()
-WHERE customer_id = $1 AND available >= $2;
+SET available = available - sqlc.arg(amount), frozen = frozen + sqlc.arg(amount), updated_at = now()
+WHERE customer_id = $1 AND available >= sqlc.arg(amount);
 
 -- name: UnfreezeWallet :execrows
 UPDATE wallets
-SET available = available + $2, frozen = frozen - $2, updated_at = now()
-WHERE customer_id = $1 AND frozen >= $2;
+SET available = available + sqlc.arg(amount), frozen = frozen - sqlc.arg(amount), updated_at = now()
+WHERE customer_id = $1 AND frozen >= sqlc.arg(amount);
 
 -- name: SettleFrozenWallet :one
 UPDATE wallets
-SET frozen = frozen - $2, updated_at = now()
-WHERE customer_id = $1 AND frozen >= $2
+SET frozen = frozen - sqlc.arg(amount), updated_at = now()
+WHERE customer_id = $1 AND frozen >= sqlc.arg(amount)
 RETURNING *;
 
 -- name: AuditCustomerLedger :one

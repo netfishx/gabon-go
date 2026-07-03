@@ -48,15 +48,16 @@ func writeLedger(ctx context.Context, q *db.Queries, customerID int64, typ db.Tr
 }
 
 // ListTransactions 按流水号降序游标分页。cursor=0 表示第一页；
-// 返回的 next=0 表示没有更多。
+// 返回的 next=0 表示没有更多。多取一行探测，避免整倍数时发出指向空页的游标。
 func (s *Service) ListTransactions(ctx context.Context, customerID, cursor int64, limit int32) (items []db.Transaction, next int64, err error) {
 	items, err = s.q.ListTransactions(ctx, db.ListTransactionsParams{
-		CustomerID: customerID, Cursor: cursor, RowLimit: limit,
+		CustomerID: customerID, Cursor: cursor, RowLimit: limit + 1,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list transactions: %w", err)
 	}
-	if len(items) > 0 && len(items) == int(limit) {
+	if len(items) > int(limit) {
+		items = items[:limit]
 		next = items[len(items)-1].ID
 	}
 	return items, next, nil

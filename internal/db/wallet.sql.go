@@ -48,11 +48,11 @@ RETURNING customer_id, available, frozen, updated_at
 
 type CreditWalletParams struct {
 	CustomerID int64
-	Available  int64
+	Amount     int64
 }
 
 func (q *Queries) CreditWallet(ctx context.Context, arg CreditWalletParams) (Wallet, error) {
-	row := q.db.QueryRow(ctx, creditWallet, arg.CustomerID, arg.Available)
+	row := q.db.QueryRow(ctx, creditWallet, arg.CustomerID, arg.Amount)
 	var i Wallet
 	err := row.Scan(
 		&i.CustomerID,
@@ -72,11 +72,11 @@ RETURNING customer_id, available, frozen, updated_at
 
 type DebitWalletParams struct {
 	CustomerID int64
-	Available  int64
+	Amount     int64
 }
 
 func (q *Queries) DebitWallet(ctx context.Context, arg DebitWalletParams) (Wallet, error) {
-	row := q.db.QueryRow(ctx, debitWallet, arg.CustomerID, arg.Available)
+	row := q.db.QueryRow(ctx, debitWallet, arg.CustomerID, arg.Amount)
 	var i Wallet
 	err := row.Scan(
 		&i.CustomerID,
@@ -95,11 +95,11 @@ WHERE customer_id = $1 AND available >= $2
 
 type FreezeWalletParams struct {
 	CustomerID int64
-	Available  int64
+	Amount     int64
 }
 
 func (q *Queries) FreezeWallet(ctx context.Context, arg FreezeWalletParams) (int64, error) {
-	result, err := q.db.Exec(ctx, freezeWallet, arg.CustomerID, arg.Available)
+	result, err := q.db.Exec(ctx, freezeWallet, arg.CustomerID, arg.Amount)
 	if err != nil {
 		return 0, err
 	}
@@ -208,11 +208,11 @@ RETURNING customer_id, available, frozen, updated_at
 
 type SettleFrozenWalletParams struct {
 	CustomerID int64
-	Frozen     int64
+	Amount     int64
 }
 
 func (q *Queries) SettleFrozenWallet(ctx context.Context, arg SettleFrozenWalletParams) (Wallet, error) {
-	row := q.db.QueryRow(ctx, settleFrozenWallet, arg.CustomerID, arg.Frozen)
+	row := q.db.QueryRow(ctx, settleFrozenWallet, arg.CustomerID, arg.Amount)
 	var i Wallet
 	err := row.Scan(
 		&i.CustomerID,
@@ -249,11 +249,11 @@ WHERE customer_id = $1 AND frozen >= $2
 
 type UnfreezeWalletParams struct {
 	CustomerID int64
-	Available  int64
+	Amount     int64
 }
 
 func (q *Queries) UnfreezeWallet(ctx context.Context, arg UnfreezeWalletParams) (int64, error) {
-	result, err := q.db.Exec(ctx, unfreezeWallet, arg.CustomerID, arg.Available)
+	result, err := q.db.Exec(ctx, unfreezeWallet, arg.CustomerID, arg.Amount)
 	if err != nil {
 		return 0, err
 	}
