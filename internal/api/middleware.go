@@ -19,32 +19,36 @@ func customerFrom(ctx context.Context) *db.Customer {
 	return c
 }
 
-// requireCustomer 解析 Bearer token 并点查客户状态：
-// 封禁即时生效；pwd 戳与当前 password_changed_at 不一致（已改密）即失效。
+// requireCustomer 客户面鉴权：共享序列见 auth.SubjectMiddleware。
 func (h *Handler) requireCustomer(next http.Handler) http.Handler {
+	m := auth.SubjectMiddleware[*db.Customer]{
+		Tokens:   h.Tokens,
+		Audience: auth.AudienceCustomer,
+		Load:     h.Customers.GetByID,
+		Stamp: func(c *db.Customer) int64 {
+			return auth.PasswordStamp(c.PasswordChangedAt.Time)
+		},
+		Check: func(c *db.Customer) error {
+			if c.Status == db.CustomerStatusBanned {
+				return apierr.New(http.StatusForbidden, apierr.CodeCustomerBanned, "account is banned")
+			}
+			return nil
+		},
+		Inject: func(ctx context.Context, c *db.Customer) context.Context {
+			return context.WithValue(ctx, ctxKeyCustomer, c)
+		},
+	}
+	return m.Middleware(next)
+}
+
+// recordActive DAU 打点：独立于鉴权的旁路中间件，失败降级为日志，不阻断请求。
+func (h *Handler) recordActive(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, pwdStamp, err := h.Tokens.FromRequest(r, auth.AudienceCustomer)
-		if err != nil {
-			apierr.Write(w, apierr.Unauthorized())
-			return
+		if c := customerFrom(r.Context()); c != nil {
+			if err := h.Reports.RecordActive(r.Context(), c.ID); err != nil {
+				slog.WarnContext(r.Context(), "record daily active failed", "customer_id", c.ID, "error", err)
+			}
 		}
-		c, err := h.Customers.GetByID(r.Context(), id)
-		if err != nil {
-			apierr.Write(w, err)
-			return
-		}
-		if pwdStamp != c.PasswordChangedAt.Time.UnixMicro() {
-			apierr.Write(w, apierr.Unauthorized())
-			return
-		}
-		if c.Status == db.CustomerStatusBanned {
-			apierr.Write(w, apierr.New(http.StatusForbidden, apierr.CodeCustomerBanned, "account is banned"))
-			return
-		}
-		// DAU 打点：旁路数据，失败降级为日志，不阻断请求
-		if err := h.Reports.RecordActive(r.Context(), c.ID); err != nil {
-			slog.WarnContext(r.Context(), "record daily active failed", "customer_id", c.ID, "error", err)
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyCustomer, c)))
+		next.ServeHTTP(w, r)
 	})
 }

@@ -22,11 +22,20 @@ const maxCodeRetries = 5
 type Service struct {
 	pool *pgxpool.Pool
 	q    *db.Queries
+
+	// 短码生成器：可注入以便测试强制碰撞，默认 crypto/rand 实现
+	genPublicID   func() (string, error)
+	genInviteCode func() (string, error)
 }
 
 // NewService 构造客户域服务。
 func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool, q: db.New(pool)}
+	return &Service{
+		pool:          pool,
+		q:             db.New(pool),
+		genPublicID:   newPublicID,
+		genInviteCode: newInviteCode,
+	}
 }
 
 // Register 注册客户：同一事务内写入客户（含邀请关系与祖先路径）与零余额钱包，
@@ -52,11 +61,11 @@ func (s *Service) Register(ctx context.Context, username, password, inviteCode s
 	}
 
 	for range maxCodeRetries {
-		publicID, err := newPublicID()
+		publicID, err := s.genPublicID()
 		if err != nil {
 			return nil, err
 		}
-		newCode, err := newInviteCode()
+		newCode, err := s.genInviteCode()
 		if err != nil {
 			return nil, err
 		}

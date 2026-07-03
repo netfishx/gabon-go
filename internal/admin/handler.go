@@ -39,29 +39,26 @@ func adminFrom(ctx context.Context) *db.Admin {
 	return a
 }
 
-// requireAdmin 与客户面同构：Bearer 解析（共用 TokenIssuer.FromRequest）+ 主体状态点查 + pwd 戳校验。
+// requireAdmin 后台面鉴权：共享序列见 auth.SubjectMiddleware。
 func (h *Handler) requireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id, pwdStamp, err := h.Tokens.FromRequest(r, auth.AudienceAdmin)
-		if err != nil {
-			apierr.Write(w, apierr.Unauthorized())
-			return
-		}
-		a, err := h.Admins.GetByID(r.Context(), id)
-		if err != nil {
-			apierr.Write(w, err)
-			return
-		}
-		if pwdStamp != a.PasswordChangedAt.Time.UnixMicro() {
-			apierr.Write(w, apierr.Unauthorized())
-			return
-		}
-		if a.Status == db.AdminStatusDisabled {
-			apierr.Write(w, apierr.New(http.StatusForbidden, apierr.CodeAdminDisabled, "admin account is disabled"))
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyAdmin, a)))
-	})
+	m := auth.SubjectMiddleware[*db.Admin]{
+		Tokens:   h.Tokens,
+		Audience: auth.AudienceAdmin,
+		Load:     h.Admins.GetByID,
+		Stamp: func(a *db.Admin) int64 {
+			return auth.PasswordStamp(a.PasswordChangedAt.Time)
+		},
+		Check: func(a *db.Admin) error {
+			if a.Status == db.AdminStatusDisabled {
+				return apierr.New(http.StatusForbidden, apierr.CodeAdminDisabled, "admin account is disabled")
+			}
+			return nil
+		},
+		Inject: func(ctx context.Context, a *db.Admin) context.Context {
+			return context.WithValue(ctx, ctxKeyAdmin, a)
+		},
+	}
+	return m.Middleware(next)
 }
 
 type loginRequest struct {

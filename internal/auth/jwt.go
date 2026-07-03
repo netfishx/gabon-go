@@ -46,7 +46,7 @@ func (i *TokenIssuer) Issue(subjectID int64, audience string, passwordChangedAt 
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(tokenTTL)),
 		},
-		PasswordStamp: passwordChangedAt.UnixMicro(),
+		PasswordStamp: PasswordStamp(passwordChangedAt),
 	}
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(i.secret)
 	if err != nil {
