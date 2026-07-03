@@ -13,6 +13,7 @@ import (
 
 	"github.com/netfishx/gabon-go/internal/app"
 	"github.com/netfishx/gabon-go/internal/config"
+	"github.com/netfishx/gabon-go/internal/storage"
 	"github.com/netfishx/gabon-go/internal/testdb"
 )
 
@@ -47,19 +48,45 @@ func run(m *testing.M) (int, error) {
 	defer cleanup()
 	testPool = pool
 
+	mio, cleanupMinio, err := testdb.StartMinIO(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("start minio: %w", err)
+	}
+	defer cleanupMinio()
+
 	cfg := &config.Config{
 		DatabaseURL:   "managed-by-testdb",
 		JWTSecret:     []byte("test-secret-test-secret-test-secret!"),
 		HTTPAddr:      ":0",
 		AdminUsername: bootstrapAdminUsername,
 		AdminPassword: bootstrapAdminPassword,
+		S3Endpoint:    mio.Endpoint,
+		S3AccessKey:   mio.AccessKey,
+		S3SecretKey:   mio.SecretKey,
+		S3Bucket:      "gabon-test",
+		CDNBaseURL:    "http://" + mio.Endpoint + "/gabon-test",
 	}
+	store, err := storage.New(storage.Config{
+		Endpoint: cfg.S3Endpoint, AccessKey: cfg.S3AccessKey,
+		SecretKey: cfg.S3SecretKey, Bucket: cfg.S3Bucket,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("storage client: %w", err)
+	}
+	if err := store.EnsureBucket(ctx); err != nil {
+		return 0, fmt.Errorf("ensure bucket: %w", err)
+	}
+
 	if err := app.Bootstrap(ctx, cfg, testPool); err != nil {
 		return 0, fmt.Errorf("bootstrap: %w", err)
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	testServer = httptest.NewServer(app.New(cfg, testPool, logger))
+	a, err := app.New(cfg, testPool, logger)
+	if err != nil {
+		return 0, fmt.Errorf("assemble app: %w", err)
+	}
+	testServer = httptest.NewServer(a.Handler)
 	defer testServer.Close()
 
 	return m.Run(), nil

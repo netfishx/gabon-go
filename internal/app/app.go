@@ -17,6 +17,8 @@ import (
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/storage"
+	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
@@ -25,8 +27,24 @@ func Bootstrap(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) erro
 	return admin.NewService(pool).Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
 }
 
-// New 装配完整 HTTP handler；main 与 httptest E2E 共用。
-func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+// App 装配完成的应用：HTTP handler 与后台组件（后续切片加入转码 worker）。
+type App struct {
+	Handler http.Handler
+}
+
+// New 装配完整应用；main 与 httptest E2E 共用。
+func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, error) {
+	store, err := storage.New(storage.Config{
+		Endpoint:  cfg.S3Endpoint,
+		AccessKey: cfg.S3AccessKey,
+		SecretKey: cfg.S3SecretKey,
+		Bucket:    cfg.S3Bucket,
+		UseSSL:    cfg.S3UseSSL,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
@@ -39,6 +57,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 		Tokens:    tokens,
 		Reports:   report.NewService(pool),
 		Wallets:   wallet.NewService(pool),
+		Videos:    video.NewService(pool, store),
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 
@@ -48,7 +67,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 
-	return r
+	return &App{Handler: r}, nil
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

@@ -7,6 +7,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
@@ -16,6 +17,7 @@ type Handler struct {
 	Tokens    *auth.TokenIssuer
 	Reports   *report.Service
 	Wallets   *wallet.Service
+	Videos    *video.Service
 }
 
 // Routes 组装客户面路由。
@@ -31,6 +33,8 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/auth/refresh", h.handleRefresh)
 		r.Get("/wallet", h.handleWallet)
 		r.Get("/wallet/transactions", h.handleWalletTransactions)
+		r.Post("/videos/uploads", h.handleVideoUpload)
+		r.Post("/videos", h.handleVideoConfirm)
 	})
 	return r
 }

@@ -52,9 +52,14 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	a, err := app.New(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           app.New(cfg, pool, logger),
+		Handler:           a.Handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
