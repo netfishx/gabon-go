@@ -92,3 +92,35 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toCustomerResponse(customerFrom(r.Context())))
 }
+
+type changePasswordRequest struct {
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+func (h *Handler) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	var req changePasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.NewPassword) < passwordMinLen || len(req.NewPassword) > passwordMaxLen {
+		apierr.Write(w, apierr.InvalidArgument("new_password must be 6-72 chars"))
+		return
+	}
+	if err := h.Customers.ChangePassword(r.Context(), customerFrom(r.Context()), req.OldPassword, req.NewPassword); err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleRefresh 用仍有效的 token 换取新 token；pwd 戳取当前值。
+func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	c := customerFrom(r.Context())
+	token, err := h.Tokens.Issue(c.ID, auth.AudienceCustomer, c.PasswordChangedAt.Time)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}

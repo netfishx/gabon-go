@@ -25,6 +25,8 @@ func (h *Handler) Routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireCustomer)
 		r.Get("/me", h.handleMe)
+		r.Post("/me/password", h.handleChangePassword)
+		r.Post("/auth/refresh", h.handleRefresh)
 	})
 	return r
 }

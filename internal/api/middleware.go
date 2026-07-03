@@ -42,7 +42,7 @@ func (h *Handler) requireCustomer(next http.Handler) http.Handler {
 			apierr.Write(w, err)
 			return
 		}
-		if pwdStamp != c.PasswordChangedAt.Time.Unix() {
+		if pwdStamp != c.PasswordChangedAt.Time.UnixMicro() {
 			unauthorized(w)
 			return
 		}

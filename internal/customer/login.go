@@ -43,6 +43,28 @@ func (s *Service) Login(ctx context.Context, username, password string) (*db.Cus
 	return &c, nil
 }
 
+// ChangePassword 校验旧密码后更新哈希并刷新 password_changed_at——
+// pwd 戳随之变化，所有旧 token 立即失效（改密踢下线）。
+func (s *Service) ChangePassword(ctx context.Context, c *db.Customer, oldPassword, newPassword string) error {
+	ok, err := auth.VerifyPassword(c.PasswordHash, oldPassword)
+	if err != nil {
+		return fmt.Errorf("verify old password: %w", err)
+	}
+	if !ok {
+		return badCredentials()
+	}
+	newHash, err := auth.HashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("hash new password: %w", err)
+	}
+	if err := s.q.UpdateCustomerPassword(ctx, db.UpdateCustomerPasswordParams{
+		ID: c.ID, PasswordHash: newHash,
+	}); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
 // GetByID 供鉴权中间件与 /me 使用。
 func (s *Service) GetByID(ctx context.Context, id int64) (*db.Customer, error) {
 	c, err := s.q.GetCustomerByID(ctx, id)
