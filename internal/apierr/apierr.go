@@ -13,7 +13,7 @@ const (
 	CodeInvalidArgument = "COMMON_INVALID_ARGUMENT"
 	CodeInternal        = "COMMON_INTERNAL"
 
-	CodeAuthBadCredentials = "AUTH_BAD_CREDENTIALS"
+	CodeAuthBadCredentials = "AUTH_BAD_CREDENTIALS" // #nosec G101 -- 错误码常量，非凭据
 	CodeAuthUnauthorized   = "AUTH_UNAUTHORIZED"
 
 	CodeAdminDisabled = "ADMIN_DISABLED"
@@ -23,6 +23,7 @@ const (
 	CodeCustomerBanned            = "CUSTOMER_BANNED"
 )
 
+// Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。
 type Error struct {
 	Status  int    `json:"-"`
 	Code    string `json:"code"`
@@ -31,10 +32,12 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
+// New 构造带状态码与错误码的业务错误。
 func New(status int, code, message string) *Error {
 	return &Error{Status: status, Code: code, Message: message}
 }
 
+// InvalidArgument 400 参数错误的便捷构造。
 func InvalidArgument(message string) *Error {
 	return New(http.StatusBadRequest, CodeInvalidArgument, message)
 }

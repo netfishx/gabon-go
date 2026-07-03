@@ -14,11 +14,13 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
+// Handler 后台面 /admin/v1 的 handler 集。
 type Handler struct {
 	Admins *Service
 	Tokens *auth.TokenIssuer
 }
 
+// Routes 组装后台面路由。
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/auth/login", h.handleLogin)

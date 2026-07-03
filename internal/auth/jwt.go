@@ -8,6 +8,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// 受众常量：JWT aud，区分双主体。
 const (
 	AudienceCustomer = "customer"
 	AudienceAdmin    = "admin"
@@ -23,14 +24,17 @@ type Claims struct {
 	PasswordStamp int64 `json:"pwd"`
 }
 
+// TokenIssuer 负责 HS256 token 的签发与校验，customer/admin 共用。
 type TokenIssuer struct {
 	secret []byte
 }
 
+// NewTokenIssuer 用 config 中的对称密钥构造签发器。
 func NewTokenIssuer(secret []byte) *TokenIssuer {
 	return &TokenIssuer{secret: secret}
 }
 
+// Issue 为主体签发带 pwd 戳的 token。
 func (i *TokenIssuer) Issue(subjectID int64, audience string, passwordChangedAt time.Time) (string, error) {
 	now := time.Now()
 	claims := Claims{
@@ -54,7 +58,7 @@ func (i *TokenIssuer) Parse(token, audience string) (subjectID int64, passwordSt
 	var claims Claims
 	_, err = jwt.ParseWithClaims(
 		token, &claims,
-		func(t *jwt.Token) (any, error) { return i.secret, nil },
+		func(_ *jwt.Token) (any, error) { return i.secret, nil },
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithAudience(audience),
 		jwt.WithExpirationRequired(),

@@ -23,10 +23,12 @@ func mustLoadLocation(name string) *time.Location {
 	return loc
 }
 
+// Service 报表域服务。
 type Service struct {
 	q *db.Queries
 }
 
+// NewService 构造报表域服务。
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{q: db.New(pool)}
 }

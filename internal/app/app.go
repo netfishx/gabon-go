@@ -24,6 +24,7 @@ func Bootstrap(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) erro
 	return admin.NewService(pool).Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
 }
 
+// New 装配完整 HTTP handler；main 与 httptest E2E 共用。
 func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

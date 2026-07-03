@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  # standard 集 = errcheck / govet / ineffassign / staticcheck / unused
+  default: standard
+  enable:
+    - bodyclose
+    - gosec
+    - revive
+    - sqlclosecheck
+  exclusions:
+    generated: lax
+    rules:
+      # 测试放宽：gosec（测试凭据）、bodyclose/errcheck（helper 经 t.Cleanup 统一关闭，误报）
+      - path: '(.+)_test\.go'
+        linters:
+          - gosec
+          - bodyclose
+          - errcheck
+
+formatters:
+  enable:
+    - gofumpt

@@ -53,7 +53,7 @@ api / admin  →  各功能域  →  internal/db
 ## HTTP 面
 
 - 路由：chi，`/api/v1/*` 与 `/admin/v1/*` 两个子路由，各挂各的鉴权中间件
-- 中间件栈：RequestID / RealIP / Recoverer / slog 请求日志 / 鉴权
+- 中间件栈：RequestID / Recoverer / slog 请求日志 / 鉴权（不用 `middleware.RealIP`——chi 5.3 起因 IP 伪造漏洞废弃，客户端 IP 将来按可信代理链单独处理）
 - 响应形状 **status-first**：
   - 成功：2xx + data 直出（无 envelope 剥壳）
   - 失败：4xx/5xx + `{"code": "WALLET_INSUFFICIENT_BALANCE", "message": "..."}`

@@ -8,6 +8,7 @@ import (
 
 const minJWTSecretLen = 32
 
+// Config 全部运行时配置，一次装载、启动即校验。
 type Config struct {
 	DatabaseURL string
 	JWTSecret   []byte
@@ -17,6 +18,7 @@ type Config struct {
 	AdminPassword string
 }
 
+// Load 从环境变量装载配置，必填项缺失立即报错（fail fast）。
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:   os.Getenv("DATABASE_URL"),

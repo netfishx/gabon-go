@@ -15,10 +15,12 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
+// Service 后台域服务。
 type Service struct {
 	q *db.Queries
 }
 
+// NewService 构造后台域服务。
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{q: db.New(pool)}
 }
@@ -47,6 +49,7 @@ func (s *Service) Bootstrap(ctx context.Context, username, password string) erro
 	return nil
 }
 
+// Login 校验管理员凭证；禁用账号不可登录。
 func (s *Service) Login(ctx context.Context, username, password string) (*db.Admin, error) {
 	a, err := s.q.GetAdminByUsername(ctx, username)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -71,6 +74,7 @@ func (s *Service) Login(ctx context.Context, username, password string) (*db.Adm
 	return &a, nil
 }
 
+// GetByID 供后台鉴权中间件与 /me 使用。
 func (s *Service) GetByID(ctx context.Context, id int64) (*db.Admin, error) {
 	a, err := s.q.GetAdminByID(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {

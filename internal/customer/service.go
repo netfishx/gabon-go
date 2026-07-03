@@ -22,11 +22,13 @@ const (
 	maxCodeRetries = 5
 )
 
+// Service 客户域服务，直连 sqlc 生成的查询。
 type Service struct {
 	pool *pgxpool.Pool
 	q    *db.Queries
 }
 
+// NewService 构造客户域服务。
 func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool, q: db.New(pool)}
 }

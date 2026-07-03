@@ -58,6 +58,6 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("decode key: %w", err)
 	}
-	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want))) // #nosec G115 -- key 长度为解码后的固定 32 字节
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
