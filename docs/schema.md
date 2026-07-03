@@ -41,9 +41,11 @@ withdrawal_order_status  pending_review / rejected / paying / succeeded / failed
 payment_event_direction  request / response / callback / query
 ranking_period           weekly / monthly
 task_period              daily / weekly / monthly
+task_category            watch_video / upload_video / share_video / comment / like / login /
+                         invite_friend / watch_ad
 claim_status             claimed / submitted / approved / rewarded / rejected / expired   ← 六态，验收基准
-activity_reward_kind     daily / milestone
-ad_status                active / offline（核对：旧版广告状态集）
+activity_reward_kind     daily / milestone / invite_valid
+ad_status                active / offline（"在投" = 广告 active ∧ 广告商 active ∧ 库存>0）
 ```
 
 ## 账号与裂变
@@ -67,6 +69,7 @@ admins      id, username UNIQUE, password_hash, password_changed_at,
 - `ancestors`：自根到父的物化祖先路径，注册时写死终身不变；团队 3 级查询 = `ancestors && ARRAY[me]` 走 GIN 再按数组尾部位置过滤；`inviter_id` 是规范来源，数组可随时用递归 CTE 重建
 - `valid_at` 取代旧版 `valid_user 0/1/2`：置位即有效、永不回退；僵尸态 `2`（从未被写入）不复刻，"作品奖励是否已发"由流水幂等索引承载
 - 有效用户翻转（有作品 且 有成功邀请 且 有联系方式）用条件 UPDATE `WHERE valid_at IS NULL` 原子完成
+- 邀请奖励上限：邀请人有效邀请数**超过**其 VIP 档 `invite_reward_cap` 时跳过（实际至多发 cap 笔）；金额读 `activity_reward_configs`（该表为通用活动奖励配置，非签到专属）
 
 ## 钱包（纯账本，见 ADR-0006）
 
@@ -85,7 +88,7 @@ transactions  id, customer_id, type transaction_type,
 
 - insert-only、无状态列；扣减一律原子条件 UPDATE（`WHERE available >= amount`）+ `RETURNING` 取 `balance_after`，同事务落流水
 - 审计：`SUM(amount) = available + frozen` 一条 SQL 对账
-- `ref_id` 语义表：recharge/withdrawal→现金订单 id；watch_reward→plays.id；periodic_task_reward→periodic_task_progress.id；claim_task_reward→task_claims.id；sign_in_reward→sign_ins.id；milestone_reward→milestone_awards.id；invite_valid_reward→**被邀请人 customer_id**（"一个被邀请人只触发一次"由约束保证）；vip_purchase→vip_purchases.id；content_reward→（核对：旧版发放链路未完成，admin 手动发时可为 NULL）
+- `ref_id` 语义表：recharge/withdrawal→现金订单 id；watch_reward→plays.id；periodic_task_reward→periodic_task_progress.id；claim_task_reward→task_claims.id；sign_in_reward→sign_ins.id；milestone_reward→milestone_awards.id；invite_valid_reward→**被邀请人 customer_id**（"一个被邀请人只触发一次"由约束保证）；vip_purchase→vip_purchases.id；content_reward→NULL（类型保留以承接迁移数据；发放链路旧版即不存在，不建）
 
 ## 现金订单（充值/提现分表）
 
@@ -156,7 +159,7 @@ plays           id, customer_id, video_id, played_at, valid_at timestamptz NULL
 
 - 状态机：`pending_transcode → transcoding → pending_review → published / rejected`（+`transcode_failed` 终态）；审核通过触发作者 `video_count+1`
 - 旧版 `uploader_name`/`is_uploader_vip` 快照列不复刻，Feed 联表现查
-- 标签为自由文本数组，无字典表（核对：旧版无按标签检索需求）
+- 标签为自由文本数组，无字典表（已核对：旧版无任何按标签检索/筛选，纯展示字段）
 
 ## 热度榜单
 
@@ -184,13 +187,12 @@ follows   id, follower_id, followee_id, deleted_at, created_at
 ## 任务系统（定义分表 + 进度去重置 cron）
 
 ```
-periodic_tasks          id, name, description, icon_path, category,     -- 类别 8 类（核对：旧版枚举值）
+periodic_tasks          id, name, description, icon_path, category task_category,
                         period task_period, target int, reward bigint,
                         display_order, enabled, deleted_at, created_at, updated_at
 
 claim_tasks             id, name, description, icon_path,
                         min_vip_level, reward bigint,
-                        claim_duration interval,                        -- 领取后完成时限（核对：旧版限量语义）
                         requirement, flow, link,
                         display_order, enabled, starts_at, ends_at,
                         deleted_at, created_at, updated_at
@@ -203,10 +205,11 @@ periodic_task_progress  id, customer_id, task_id, period_key text,      -- '2026
 task_claims             id, customer_id, task_id, status claim_status,
                         proof_text, proof_images text[] CHECK(1..9),    -- 须本人上传的存储路径
                         reward_base bigint, reward_granted bigint,      -- 倍率前/后
-                        expires_at, claimed_at, submitted_at,
+                        expires_at,                                     -- 领取时任务 ends_at 的快照
+                        claimed_at, submitted_at,
                         reviewed_by → admins, reviewed_at, review_remark,
                         rewarded_at, created_at, updated_at
-                        UNIQUE(customer_id, task_id)                    -- 一人一次（核对）
+                        UNIQUE(customer_id, task_id)                    -- 一人一次（旧版 count 防重的约束化）
 ```
 
 - 周期进度 **period_key 行模式**：新周期首个事件 UPSERT 新行，无预生成、无重置 cron（旧版每日 00:00:05 重置 cron 消失——实现简化，对外行为等价）；"过期/已完成"由 `period_key`/`progress>=target` 推导，不设状态列
@@ -224,7 +227,7 @@ activity_reward_configs  id, kind activity_reward_kind, threshold int, reward bi
                          enabled, created_at, updated_at
 ```
 
-- 按自然月累计 = `COUNT WHERE month`；奖励按 VIP 倍率放大（截断取整，核对：旧版取整行为）
+- 按自然月累计 = `COUNT WHERE month`；奖励按 VIP 倍率放大（`floor(base × multiplier)`，整数 bp 除法与旧版同口径）
 
 ## VIP
 

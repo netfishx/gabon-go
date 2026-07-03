@@ -87,6 +87,25 @@ api / admin  →  各功能域  →  internal/db
 | E2E | 标准库 `httptest` 挂完整 chi router；ffmpeg 用小样本真转码冒烟 |
 | 任务入口 | Makefile：`make lint / test / build / migrate` |
 
+## 落地顺序（M1–M7）
+
+每个里程碑以 feature-checklist 对应项的 E2E 通过为完成标准：
+
+| 里程碑 | 内容 | 定位 |
+|--------|------|------|
+| M1 | 骨架 + 全量 goose 迁移（一次落 28 表，按域拆文件）+ auth + customers 注册/登录 | 一切的根 |
+| M2 | wallet + transactions | 核心被依赖域，资金不变量最先钉死 |
+| M3 | 视频管线：预签名上传 → confirm → 转码 worker → 审核 → Feed | 基建最重（S3/MinIO、ffmpeg、DB 队列），风险前置 |
+| M4 | 邀请裂变 + 有效用户判定 | 依赖 M2（发奖）+ M3（有作品） |
+| M5 | 奖励族：任务 + 签到 + VIP + 广告 | "事件→进度→发奖"同构，流水线铺开 |
+| M6 | 充值提现 + Provider 四渠道 + payment_events | 资金外联最敏感，放在钱包语义锤打成熟之后 |
+| M7 | 关注 + 榜单结算 + 报表 + admin 收尾 | 低耦合尾部 |
+
+## 工程流程
+
+- **里程碑分支 + PR**：每个 M 一条 `feat/mN-*` 分支，完成后 PR 合入 main；main 保持"每个合并点全量测试通过"
+- **CI**：GitHub Actions 最小配置——`make lint` + `make test` 两个 job（testcontainers 真库、runner 装 ffmpeg 冒烟）；不搞构建矩阵与部署流水线。CI 属开发基建，不在 ADR-0005 运行时云服务禁区内
+
 ## 平台版本锚点
 
 - PostgreSQL **18**（testcontainers 与生产同版本）
