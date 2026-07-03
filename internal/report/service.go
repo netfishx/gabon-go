@@ -7,13 +7,17 @@ import (
 	"sync"
 	"time"
 
+	// 嵌入时区数据：本包在包初始化期即加载 Asia/Shanghai，blank import 建立依赖边，
+	// 保证 tzdata 先注册——无系统 zoneinfo 的最小容器与测试二进制都不受影响。
+	_ "time/tzdata"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
-// 时区锚点 Asia/Shanghai：活跃按此时区记天（main 已嵌入 tzdata 兜底）。
+// 时区锚点 Asia/Shanghai：活跃按此时区记天。
 var shanghai = mustLoadLocation("Asia/Shanghai")
 
 func mustLoadLocation(name string) *time.Location {

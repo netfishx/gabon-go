@@ -57,7 +57,11 @@ CREATE TABLE task_claims (
     task_id        bigint NOT NULL REFERENCES claim_tasks (id),
     status         claim_status NOT NULL DEFAULT 'claimed',
     proof_text     text,
-    proof_images   text[] NOT NULL DEFAULT '{}' CHECK (cardinality(proof_images) <= 9),
+    -- 证明图上界恒为 9；下界随状态：claimed/expired（未提交）允许为空，提交后各状态强制 ≥1
+    proof_images   text[] NOT NULL DEFAULT '{}' CHECK (
+        cardinality(proof_images) <= 9
+        AND (status IN ('claimed', 'expired') OR cardinality(proof_images) >= 1)
+    ),
     reward_base    bigint NOT NULL,
     reward_granted bigint,
     expires_at     timestamptz,
