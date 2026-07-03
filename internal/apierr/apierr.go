@@ -23,6 +23,8 @@ const (
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 	CodeCustomerBanned            = "CUSTOMER_BANNED"
+
+	CodeWalletInsufficientBalance = "WALLET_INSUFFICIENT_BALANCE"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。

@@ -19,3 +19,25 @@ RETURNING *;
 SELECT EXISTS (
     SELECT 1 FROM transactions WHERE type = $1 AND ref_id = $2
 );
+
+-- name: DebitWallet :one
+UPDATE wallets
+SET available = available - $2, updated_at = now()
+WHERE customer_id = $1 AND available >= $2
+RETURNING *;
+
+-- name: FreezeWallet :execrows
+UPDATE wallets
+SET available = available - $2, frozen = frozen + $2, updated_at = now()
+WHERE customer_id = $1 AND available >= $2;
+
+-- name: UnfreezeWallet :execrows
+UPDATE wallets
+SET available = available + $2, frozen = frozen - $2, updated_at = now()
+WHERE customer_id = $1 AND frozen >= $2;
+
+-- name: SettleFrozenWallet :one
+UPDATE wallets
+SET frozen = frozen - $2, updated_at = now()
+WHERE customer_id = $1 AND frozen >= $2
+RETURNING *;

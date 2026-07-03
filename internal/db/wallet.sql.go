@@ -42,6 +42,49 @@ func (q *Queries) CreditWallet(ctx context.Context, arg CreditWalletParams) (Wal
 	return i, err
 }
 
+const debitWallet = `-- name: DebitWallet :one
+UPDATE wallets
+SET available = available - $2, updated_at = now()
+WHERE customer_id = $1 AND available >= $2
+RETURNING customer_id, available, frozen, updated_at
+`
+
+type DebitWalletParams struct {
+	CustomerID int64
+	Available  int64
+}
+
+func (q *Queries) DebitWallet(ctx context.Context, arg DebitWalletParams) (Wallet, error) {
+	row := q.db.QueryRow(ctx, debitWallet, arg.CustomerID, arg.Available)
+	var i Wallet
+	err := row.Scan(
+		&i.CustomerID,
+		&i.Available,
+		&i.Frozen,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const freezeWallet = `-- name: FreezeWallet :execrows
+UPDATE wallets
+SET available = available - $2, frozen = frozen + $2, updated_at = now()
+WHERE customer_id = $1 AND available >= $2
+`
+
+type FreezeWalletParams struct {
+	CustomerID int64
+	Available  int64
+}
+
+func (q *Queries) FreezeWallet(ctx context.Context, arg FreezeWalletParams) (int64, error) {
+	result, err := q.db.Exec(ctx, freezeWallet, arg.CustomerID, arg.Available)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getWallet = `-- name: GetWallet :one
 SELECT customer_id, available, frozen, updated_at FROM wallets WHERE customer_id = $1
 `
@@ -93,6 +136,30 @@ func (q *Queries) InsertTransaction(ctx context.Context, arg InsertTransactionPa
 	return i, err
 }
 
+const settleFrozenWallet = `-- name: SettleFrozenWallet :one
+UPDATE wallets
+SET frozen = frozen - $2, updated_at = now()
+WHERE customer_id = $1 AND frozen >= $2
+RETURNING customer_id, available, frozen, updated_at
+`
+
+type SettleFrozenWalletParams struct {
+	CustomerID int64
+	Frozen     int64
+}
+
+func (q *Queries) SettleFrozenWallet(ctx context.Context, arg SettleFrozenWalletParams) (Wallet, error) {
+	row := q.db.QueryRow(ctx, settleFrozenWallet, arg.CustomerID, arg.Frozen)
+	var i Wallet
+	err := row.Scan(
+		&i.CustomerID,
+		&i.Available,
+		&i.Frozen,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const transactionRefExists = `-- name: TransactionRefExists :one
 SELECT EXISTS (
     SELECT 1 FROM transactions WHERE type = $1 AND ref_id = $2
@@ -109,4 +176,23 @@ func (q *Queries) TransactionRefExists(ctx context.Context, arg TransactionRefEx
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const unfreezeWallet = `-- name: UnfreezeWallet :execrows
+UPDATE wallets
+SET available = available + $2, frozen = frozen - $2, updated_at = now()
+WHERE customer_id = $1 AND frozen >= $2
+`
+
+type UnfreezeWalletParams struct {
+	CustomerID int64
+	Available  int64
+}
+
+func (q *Queries) UnfreezeWallet(ctx context.Context, arg UnfreezeWalletParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unfreezeWallet, arg.CustomerID, arg.Available)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
