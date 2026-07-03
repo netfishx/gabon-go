@@ -9,6 +9,27 @@ import (
 	"context"
 )
 
+const auditCustomerLedger = `-- name: AuditCustomerLedger :one
+SELECT
+    COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.customer_id = w.customer_id), 0)::bigint AS ledger_sum,
+    (w.available + w.frozen)::bigint AS wallet_total
+FROM wallets w
+WHERE w.customer_id = $1
+`
+
+type AuditCustomerLedgerRow struct {
+	LedgerSum   int64
+	WalletTotal int64
+}
+
+// 对账恒等式（ADR-0006）：客户全部流水之和必须等于钱包总额（可用+冻结）。
+func (q *Queries) AuditCustomerLedger(ctx context.Context, customerID int64) (AuditCustomerLedgerRow, error) {
+	row := q.db.QueryRow(ctx, auditCustomerLedger, customerID)
+	var i AuditCustomerLedgerRow
+	err := row.Scan(&i.LedgerSum, &i.WalletTotal)
+	return i, err
+}
+
 const createWallet = `-- name: CreateWallet :exec
 INSERT INTO wallets (customer_id) VALUES ($1)
 `

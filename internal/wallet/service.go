@@ -33,10 +33,20 @@ func (s *Service) ListTransactions(ctx context.Context, customerID, cursor int64
 	if err != nil {
 		return nil, 0, fmt.Errorf("list transactions: %w", err)
 	}
-	if int32(len(items)) == limit && len(items) > 0 {
+	if len(items) > 0 && len(items) == int(limit) {
 		next = items[len(items)-1].ID
 	}
 	return items, next, nil
+}
+
+// Audit 返回客户的对账双值：全部流水之和与钱包总额（可用+冻结）。
+// 两者必须恒等（ADR-0006），供测试断言与运维对账复用。
+func (s *Service) Audit(ctx context.Context, customerID int64) (ledgerSum, walletTotal int64, err error) {
+	row, err := s.q.AuditCustomerLedger(ctx, customerID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("audit ledger: %w", err)
+	}
+	return row.LedgerSum, row.WalletTotal, nil
 }
 
 // Get 查询客户钱包（注册即建行，缺行即数据异常，直接上抛）。

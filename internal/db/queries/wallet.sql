@@ -42,6 +42,14 @@ SET frozen = frozen - $2, updated_at = now()
 WHERE customer_id = $1 AND frozen >= $2
 RETURNING *;
 
+-- name: AuditCustomerLedger :one
+-- 对账恒等式（ADR-0006）：客户全部流水之和必须等于钱包总额（可用+冻结）。
+SELECT
+    COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.customer_id = w.customer_id), 0)::bigint AS ledger_sum,
+    (w.available + w.frozen)::bigint AS wallet_total
+FROM wallets w
+WHERE w.customer_id = $1;
+
 -- name: ListTransactions :many
 SELECT * FROM transactions
 WHERE customer_id = sqlc.arg(customer_id)
