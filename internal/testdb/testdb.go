@@ -15,9 +15,21 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
-// Start 启动一次性 Postgres 18 容器并应用全量迁移，返回连接池与清理函数。
-func Start(ctx context.Context) (pool *pgxpool.Pool, cleanup func(), err error) {
-	container, err := postgres.Run(
+const retryBackoff = 2 * time.Second
+
+// RunWithRetry 执行容器创建，首次失败退避一次后重试——
+// 吸收 Docker daemon 的瞬时 500（CI 曾真实发生），两次均失败才报错。
+func RunWithRetry[T any](ctx context.Context, run func(context.Context) (T, error)) (T, error) {
+	out, err := run(ctx)
+	if err == nil {
+		return out, nil
+	}
+	time.Sleep(retryBackoff)
+	return run(ctx)
+}
+
+func runPostgres(ctx context.Context) (*postgres.PostgresContainer, error) {
+	return postgres.Run(
 		ctx, "postgres:18-alpine",
 		postgres.WithDatabase("gabon_test"),
 		postgres.WithUsername("gabon"),
@@ -27,6 +39,12 @@ func Start(ctx context.Context) (pool *pgxpool.Pool, cleanup func(), err error) 
 				WithOccurrence(2).WithStartupTimeout(60*time.Second),
 		),
 	)
+}
+
+// Start 启动一次性 Postgres 18 容器并应用全量迁移，返回连接池与清理函数。
+// 容器创建带一次退避重试：CI runner 的 Docker daemon 偶发瞬时 500（曾在 main 上真实发生）。
+func Start(ctx context.Context) (pool *pgxpool.Pool, cleanup func(), err error) {
+	container, err := RunWithRetry(ctx, runPostgres)
 	if err != nil {
 		return nil, nil, fmt.Errorf("start postgres container: %w", err)
 	}
