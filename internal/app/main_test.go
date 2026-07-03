@@ -27,6 +27,11 @@ var (
 	testPool   *pgxpool.Pool
 )
 
+const (
+	bootstrapAdminUsername = "root"
+	bootstrapAdminPassword = "root-secret-1"
+)
+
 func TestMain(m *testing.M) {
 	code, err := run(m)
 	if err != nil {
@@ -74,9 +79,14 @@ func run(m *testing.M) (int, error) {
 	}
 
 	cfg := &config.Config{
-		DatabaseURL: connStr,
-		JWTSecret:   []byte("test-secret-test-secret-test-secret!"),
-		HTTPAddr:    ":0",
+		DatabaseURL:   connStr,
+		JWTSecret:     []byte("test-secret-test-secret-test-secret!"),
+		HTTPAddr:      ":0",
+		AdminUsername: bootstrapAdminUsername,
+		AdminPassword: bootstrapAdminPassword,
+	}
+	if err := app.Bootstrap(ctx, cfg, testPool); err != nil {
+		return 0, fmt.Errorf("bootstrap: %w", err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	testServer = httptest.NewServer(app.New(cfg, testPool, logger))

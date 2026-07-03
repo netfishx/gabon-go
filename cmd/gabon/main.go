@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // 嵌入时区数据：Asia/Shanghai 锚点不依赖宿主 tzdata
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -47,6 +48,10 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("migrations applied")
+
+	if err := app.Bootstrap(ctx, cfg, pool); err != nil {
+		return err
+	}
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

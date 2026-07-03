@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -49,6 +50,10 @@ func (h *Handler) requireCustomer(next http.Handler) http.Handler {
 		if c.Status == db.CustomerStatusBanned {
 			apierr.Write(w, apierr.New(http.StatusForbidden, apierr.CodeCustomerBanned, "account is banned"))
 			return
+		}
+		// DAU 打点：旁路数据，失败降级为日志，不阻断请求
+		if err := h.Reports.RecordActive(r.Context(), c.ID); err != nil {
+			slog.WarnContext(r.Context(), "record daily active failed", "customer_id", c.ID, "error", err)
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyCustomer, c)))
 	})

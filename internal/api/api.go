@@ -10,11 +10,13 @@ import (
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
+	"github.com/netfishx/gabon-go/internal/report"
 )
 
 type Handler struct {
 	Customers *customer.Service
 	Tokens    *auth.TokenIssuer
+	Reports   *report.Service
 }
 
 func (h *Handler) Routes() chi.Router {

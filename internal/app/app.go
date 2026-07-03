@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -10,11 +11,18 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/netfishx/gabon-go/internal/admin"
 	"github.com/netfishx/gabon-go/internal/api"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/customer"
+	"github.com/netfishx/gabon-go/internal/report"
 )
+
+// Bootstrap 一次性启动动作：admins 表为空时创建初始管理员。迁移之后、服务启动之前调用。
+func Bootstrap(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) error {
+	return admin.NewService(pool).Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
+}
 
 func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
 	r := chi.NewRouter()
@@ -22,12 +30,20 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
 
+	tokens := auth.NewTokenIssuer(cfg.JWTSecret)
+
 	apiHandler := &api.Handler{
 		Customers: customer.NewService(pool),
-		Tokens:    auth.NewTokenIssuer(cfg.JWTSecret),
+		Tokens:    tokens,
+		Reports:   report.NewService(pool),
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
-	r.Route("/admin/v1", func(r chi.Router) {})
+
+	adminHandler := &admin.Handler{
+		Admins: admin.NewService(pool),
+		Tokens: tokens,
+	}
+	r.Mount("/admin/v1", adminHandler.Routes())
 
 	return r
 }

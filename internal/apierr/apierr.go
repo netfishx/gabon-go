@@ -16,6 +16,8 @@ const (
 	CodeAuthBadCredentials = "AUTH_BAD_CREDENTIALS"
 	CodeAuthUnauthorized   = "AUTH_UNAUTHORIZED"
 
+	CodeAdminDisabled = "ADMIN_DISABLED"
+
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 	CodeCustomerBanned            = "CUSTOMER_BANNED"
