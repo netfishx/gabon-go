@@ -17,3 +17,19 @@ func (q *Queries) CreateWallet(ctx context.Context, customerID int64) error {
 	_, err := q.db.Exec(ctx, createWallet, customerID)
 	return err
 }
+
+const getWallet = `-- name: GetWallet :one
+SELECT customer_id, available, frozen, updated_at FROM wallets WHERE customer_id = $1
+`
+
+func (q *Queries) GetWallet(ctx context.Context, customerID int64) (Wallet, error) {
+	row := q.db.QueryRow(ctx, getWallet, customerID)
+	var i Wallet
+	err := row.Scan(
+		&i.CustomerID,
+		&i.Available,
+		&i.Frozen,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

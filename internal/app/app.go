@@ -17,6 +17,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
 // Bootstrap 一次性启动动作：admins 表为空时创建初始管理员。迁移之后、服务启动之前调用。
@@ -37,6 +38,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 		Customers: customer.NewService(pool),
 		Tokens:    tokens,
 		Reports:   report.NewService(pool),
+		Wallets:   wallet.NewService(pool),
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 

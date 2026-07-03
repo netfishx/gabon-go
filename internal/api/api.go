@@ -7,6 +7,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
 // Handler 客户面 /api/v1 的 handler 集。
@@ -14,6 +15,7 @@ type Handler struct {
 	Customers *customer.Service
 	Tokens    *auth.TokenIssuer
 	Reports   *report.Service
+	Wallets   *wallet.Service
 }
 
 // Routes 组装客户面路由。
@@ -27,6 +29,7 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/me", h.handleMe)
 		r.Post("/me/password", h.handleChangePassword)
 		r.Post("/auth/refresh", h.handleRefresh)
+		r.Get("/wallet", h.handleWallet)
 	})
 	return r
 }
