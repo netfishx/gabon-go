@@ -1,0 +1,37 @@
+// Package api 客户面 /api/v1 的 handler 与路由。
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/customer"
+)
+
+type Handler struct {
+	Customers *customer.Service
+}
+
+func (h *Handler) Routes() chi.Router {
+	r := chi.NewRouter()
+	r.Post("/auth/register", h.handleRegister)
+	return r
+}
+
+// writeJSON 成功响应：2xx + data 直出（status-first，无 envelope）。
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		apierr.Write(w, apierr.InvalidArgument("malformed JSON body"))
+		return false
+	}
+	return true
+}
