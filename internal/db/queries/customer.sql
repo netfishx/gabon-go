@@ -42,6 +42,19 @@ RETURNING inviter_id;
 SELECT COUNT(*) FROM customers
 WHERE inviter_id = $1 AND valid_at IS NOT NULL AND deleted_at IS NULL;
 
+-- name: ListTeamMembers :many
+-- 团队下钻单位：某成员的直接下级，附带各自的直接下级数（id 升序游标分页）。
+SELECT c.id, c.public_id, c.username, c.name, c.avatar_path,
+       (c.valid_at IS NOT NULL)::bool AS valid,
+       (SELECT COUNT(*) FROM customers s
+        WHERE s.inviter_id = c.id AND s.deleted_at IS NULL) AS subordinate_count
+FROM customers c
+WHERE c.inviter_id = sqlc.arg('parent_id')
+  AND c.deleted_at IS NULL
+  AND c.id > sqlc.arg('cursor')
+ORDER BY c.id
+LIMIT sqlc.arg('row_limit');
+
 -- name: UpdateCustomerProfile :one
 UPDATE customers
 SET name       = COALESCE(sqlc.narg('name'), name),

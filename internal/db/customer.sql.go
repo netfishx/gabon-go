@@ -233,6 +233,64 @@ func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
 	return err
 }
 
+const listTeamMembers = `-- name: ListTeamMembers :many
+SELECT c.id, c.public_id, c.username, c.name, c.avatar_path,
+       (c.valid_at IS NOT NULL)::bool AS valid,
+       (SELECT COUNT(*) FROM customers s
+        WHERE s.inviter_id = c.id AND s.deleted_at IS NULL) AS subordinate_count
+FROM customers c
+WHERE c.inviter_id = $1
+  AND c.deleted_at IS NULL
+  AND c.id > $2
+ORDER BY c.id
+LIMIT $3
+`
+
+type ListTeamMembersParams struct {
+	ParentID *int64
+	Cursor   int64
+	RowLimit int32
+}
+
+type ListTeamMembersRow struct {
+	ID               int64
+	PublicID         string
+	Username         string
+	Name             *string
+	AvatarPath       *string
+	Valid            bool
+	SubordinateCount int64
+}
+
+// 团队下钻单位：某成员的直接下级，附带各自的直接下级数（id 升序游标分页）。
+func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error) {
+	rows, err := q.db.Query(ctx, listTeamMembers, arg.ParentID, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTeamMembersRow
+	for rows.Next() {
+		var i ListTeamMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Username,
+			&i.Name,
+			&i.AvatarPath,
+			&i.Valid,
+			&i.SubordinateCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :one
 UPDATE customers
 SET valid_at = now(), updated_at = now()
