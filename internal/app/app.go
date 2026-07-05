@@ -17,6 +17,9 @@ import (
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/storage"
+	"github.com/netfishx/gabon-go/internal/transcode"
+	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
@@ -25,8 +28,36 @@ func Bootstrap(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) erro
 	return admin.NewService(pool).Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
 }
 
-// New 装配完整 HTTP handler；main 与 httptest E2E 共用。
-func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+// App 装配完成的应用：HTTP handler 与后台组件。
+type App struct {
+	Handler http.Handler
+
+	transcoder *transcode.Worker
+}
+
+// Start 启动后台组件（转码 worker 池：恢复超时任务 + 拉起轮询）。
+func (a *App) Start(ctx context.Context) error {
+	return a.transcoder.Start(ctx)
+}
+
+// Stop 停止后台组件并等待在途任务退出。
+func (a *App) Stop() {
+	a.transcoder.Stop()
+}
+
+// New 装配完整应用；main 与 httptest E2E 共用。
+func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, error) {
+	store, err := storage.New(storage.Config{
+		Endpoint:  cfg.S3Endpoint,
+		AccessKey: cfg.S3AccessKey,
+		SecretKey: cfg.S3SecretKey,
+		Bucket:    cfg.S3Bucket,
+		UseSSL:    cfg.S3UseSSL,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(logger))
@@ -34,21 +65,33 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handl
 
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret)
 
+	videoSvc := video.NewService(pool, store)
+
 	apiHandler := &api.Handler{
 		Customers: customer.NewService(pool),
 		Tokens:    tokens,
 		Reports:   report.NewService(pool),
 		Wallets:   wallet.NewService(pool),
+		Videos:    videoSvc,
+		CDNBase:   cfg.CDNBaseURL,
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 
 	adminHandler := &admin.Handler{
 		Admins: admin.NewService(pool),
 		Tokens: tokens,
+		Videos: videoSvc,
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 
-	return r
+	worker := transcode.NewWorker(pool, transcode.Options{
+		Transcode:   transcode.NewFFmpeg(store),
+		Concurrency: cfg.TranscodeWorkers,
+		MaxAttempts: 3,
+		JobTimeout:  cfg.TranscodeTimeout,
+	})
+
+	return &App{Handler: r, transcoder: worker}, nil
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

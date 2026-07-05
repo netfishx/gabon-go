@@ -10,12 +10,14 @@ import (
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/video"
 )
 
 // Handler 后台面 /admin/v1 的 handler 集。
 type Handler struct {
 	Admins *Service
 	Tokens *auth.TokenIssuer
+	Videos *video.Service
 }
 
 // Routes 组装后台面路由。
@@ -26,6 +28,9 @@ func (h *Handler) Routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireAdmin)
 		r.Get("/me", h.handleMe)
+		r.Get("/videos/pending", h.handlePendingVideos)
+		r.Post("/videos/{publicID}/approve", h.handleApproveVideo)
+		r.Post("/videos/{publicID}/reject", h.handleRejectVideo)
 	})
 	return r
 }

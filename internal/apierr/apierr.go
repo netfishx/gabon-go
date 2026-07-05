@@ -20,11 +20,19 @@ const (
 
 	CodeAdminDisabled = "ADMIN_DISABLED"
 
+	CodeCustomerNotFound          = "CUSTOMER_NOT_FOUND"
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 	CodeCustomerBanned            = "CUSTOMER_BANNED"
 
 	CodeWalletInsufficientBalance = "WALLET_INSUFFICIENT_BALANCE"
+
+	CodeVideoPathForbidden     = "VIDEO_PATH_FORBIDDEN"
+	CodeVideoObjectMissing     = "VIDEO_OBJECT_MISSING"
+	CodeVideoNotFound          = "VIDEO_NOT_FOUND"
+	CodeVideoNotReviewable     = "VIDEO_NOT_REVIEWABLE"
+	CodeVideoCommentDailyLimit = "VIDEO_COMMENT_DAILY_LIMIT"
+	CodeVideoCommentNotFound   = "VIDEO_COMMENT_NOT_FOUND"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。
