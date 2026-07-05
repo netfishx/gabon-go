@@ -73,19 +73,19 @@ func relativeDepth(ancestors []int64, viewerID int64) int {
 // teamDepthLevels 团队汇总恒定返回深度 1–3 三层（空层补零）。
 const teamDepthLevels = 3
 
-// TeamLayer 团队某一深度的聚合。
+// TeamLayer 团队某一深度的聚合（HTTP 序列化由 api 层 DTO 承担）。
 type TeamLayer struct {
-	Depth      int   `json:"depth"`
-	Count      int64 `json:"count"`
-	ValidCount int64 `json:"valid_count"`
+	Depth      int
+	Count      int64
+	ValidCount int64
 }
 
 // TeamSummary 团队汇总：各级人数/有效人数、总人数、查看者累计邀请奖励。
 type TeamSummary struct {
-	Total             int64       `json:"total"`
-	TotalValid        int64       `json:"total_valid"`
-	InviteRewardTotal int64       `json:"invite_reward_total"`
-	Layers            []TeamLayer `json:"layers"`
+	Total             int64
+	TotalValid        int64
+	InviteRewardTotal int64
+	Layers            []TeamLayer
 }
 
 // GetTeamSummary 聚合查看者团队（3 级以内）与累计邀请奖励（流水现算，无缓存）。

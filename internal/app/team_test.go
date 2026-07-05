@@ -61,7 +61,7 @@ func teamMembers(t *testing.T, token, parentPublicID, extra string) (*http.Respo
 	return getJSON(t, path, token)
 }
 
-// memberNames 从响应体提取 username 列表。
+// memberUsernames 从响应体提取 username 列表。
 func memberUsernames(t *testing.T, body map[string]any) []string {
 	t.Helper()
 	items, _ := body["items"].([]any)

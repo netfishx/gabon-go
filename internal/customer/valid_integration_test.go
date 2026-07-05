@@ -2,6 +2,7 @@ package customer
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,7 +13,8 @@ import (
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
-// 并发集成测（issue #24 验收）：多个触发路径同时对同一客户做有效用户判定，
+// 并发集成测（issue #24 验收）：多协程同时从**不同触发路径**对同一客户做有效用户判定——
+// 直调判定原语（= 视频审核通过路径的钩子调用）、改资料写联系方式、被邀请人注册进邀请数。
 // valid_at 的 CAS 必须保证恰好一次翻转、邀请人恰好一笔奖励，且对账恒等式成立。
 func TestConcurrentValidFlipRewardsExactlyOnce(t *testing.T) {
 	ctx := context.Background()
@@ -34,35 +36,56 @@ func TestConcurrentValidFlipRewardsExactlyOnce(t *testing.T) {
 		t.Fatalf("register invitee: %v", err)
 	}
 
-	// staging：三条件是判定的输入而非被测行为，直接凑齐
+	// staging：只预置"有作品"；联系方式与成功邀请由并发的真实触发路径补齐
 	if _, err := pool.Exec(ctx,
-		`UPDATE customers SET video_count = 1, invite_count = 1, phone = '13800009999' WHERE id = $1`,
-		invitee.ID); err != nil {
-		t.Fatalf("stage qualifications: %v", err)
+		`UPDATE customers SET video_count = 1 WHERE id = $1`, invitee.ID); err != nil {
+		t.Fatalf("stage video_count: %v", err)
 	}
 
-	const workers = 8
 	var flips atomic.Int64
 	var wg sync.WaitGroup
-	errs := make(chan error, workers)
-	start := make(chan struct{})
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
+	// 路径一 ×3：直调判定原语（审核通过钩子的调用形态）
+	// 路径二 ×3：改资料写手机号（对本人判定）
+	// 路径三 ×2：新客户以 invitee 邀请码注册（对 invitee 判定）
+	jobs := make([]func() error, 0, 8)
+	for range 3 {
+		jobs = append(jobs, func() error {
 			var flipped bool
 			err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 				var err error
 				flipped, err = svc.MarkValidIfQualifiedTx(ctx, tx, invitee.ID)
 				return err
 			})
-			if err != nil {
-				errs <- err
-				return
-			}
-			if flipped { // 仅统计提交成功的翻转
+			if err == nil && flipped {
 				flips.Add(1)
+			}
+			return err
+		})
+	}
+	for i := range 3 {
+		phone := fmt.Sprintf("1380001000%d", i)
+		jobs = append(jobs, func() error {
+			_, err := svc.UpdateProfile(ctx, invitee.ID, ProfileUpdate{Phone: &phone})
+			return err
+		})
+	}
+	for i := range 2 {
+		username := fmt.Sprintf("flip_path_reg_%d", i)
+		jobs = append(jobs, func() error {
+			_, err := svc.Register(ctx, username, "secret123", invitee.InviteCode)
+			return err
+		})
+	}
+
+	errs := make(chan error, len(jobs))
+	start := make(chan struct{})
+	for _, job := range jobs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := job(); err != nil {
+				errs <- err
 			}
 		}()
 	}
@@ -70,11 +93,20 @@ func TestConcurrentValidFlipRewardsExactlyOnce(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		t.Errorf("concurrent flip: %v", err)
+		t.Errorf("concurrent trigger: %v", err)
 	}
 
-	if got := flips.Load(); got != 1 {
-		t.Errorf("flips = %d, want exactly 1", got)
+	if got := flips.Load(); got > 1 {
+		t.Errorf("direct-primitive flips = %d, want at most 1", got)
+	}
+	var validAt *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT EXTRACT(EPOCH FROM valid_at)::bigint FROM customers WHERE id = $1`,
+		invitee.ID).Scan(&validAt); err != nil {
+		t.Fatalf("query valid_at: %v", err)
+	}
+	if validAt == nil {
+		t.Errorf("invitee not flipped after all trigger paths completed")
 	}
 
 	var available int64

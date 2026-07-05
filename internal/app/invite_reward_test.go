@@ -141,6 +141,34 @@ func TestInviteRewardConfigDisabled(t *testing.T) {
 	}
 }
 
+func TestInviteRewardConfigMissing(t *testing.T) {
+	// 配置行整体缺失（与停用同为"不发放"，验收清单并列两种）
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx,
+		`DELETE FROM activity_reward_configs WHERE kind = 'invite_valid'`); err != nil {
+		t.Fatalf("delete config: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx,
+			`INSERT INTO activity_reward_configs (kind, threshold, reward, enabled)
+			 VALUES ('invite_valid', 0, 123, true)`); err != nil {
+			t.Fatalf("restore config: %v", err)
+		}
+	})
+
+	inviter := uniqueUsername(t)
+	inviterBody := registerCustomer(t, inviter, "")
+	inviterToken := loginCustomer(t, inviter, "secret123")
+
+	invitee := flipInviteeOf(t, inviteCodeOf(t, inviterBody))
+	if got := availableOf(t, inviterToken); got != 0 {
+		t.Errorf("available with missing config = %d, want 0", got)
+	}
+	if n := inviteRewardTxCount(t, invitee); n != 0 {
+		t.Errorf("reward tx with missing config = %d, want 0", n)
+	}
+}
+
 func TestNaturalRegistrantFlipNoReward(t *testing.T) {
 	// 自然注册（无邀请人）翻转：正常完成、不产生任何奖励
 	natural := uniqueUsername(t)

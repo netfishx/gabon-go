@@ -53,11 +53,33 @@ func (h *Handler) handleTeamMembers(w http.ResponseWriter, r *http.Request) {
 	apierr.WriteJSON(w, http.StatusOK, out)
 }
 
+type teamLayerItem struct {
+	Depth      int   `json:"depth"`
+	Count      int64 `json:"count"`
+	ValidCount int64 `json:"valid_count"`
+}
+
+type teamSummaryResponse struct {
+	Total             int64           `json:"total"`
+	TotalValid        int64           `json:"total_valid"`
+	InviteRewardTotal int64           `json:"invite_reward_total"`
+	Layers            []teamLayerItem `json:"layers"`
+}
+
 func (h *Handler) handleTeamSummary(w http.ResponseWriter, r *http.Request) {
 	sum, err := h.Customers.GetTeamSummary(r.Context(), customerFrom(r.Context()).ID)
 	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	apierr.WriteJSON(w, http.StatusOK, sum)
+	out := teamSummaryResponse{
+		Total:             sum.Total,
+		TotalValid:        sum.TotalValid,
+		InviteRewardTotal: sum.InviteRewardTotal,
+		Layers:            make([]teamLayerItem, 0, len(sum.Layers)),
+	}
+	for _, l := range sum.Layers {
+		out.Layers = append(out.Layers, teamLayerItem(l))
+	}
+	apierr.WriteJSON(w, http.StatusOK, out)
 }
