@@ -52,3 +52,12 @@ func (h *Handler) handleTeamMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	apierr.WriteJSON(w, http.StatusOK, out)
 }
+
+func (h *Handler) handleTeamSummary(w http.ResponseWriter, r *http.Request) {
+	sum, err := h.Customers.GetTeamSummary(r.Context(), customerFrom(r.Context()).ID)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	apierr.WriteJSON(w, http.StatusOK, sum)
+}

@@ -43,6 +43,7 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/wallet", h.handleWallet)
 		r.Get("/wallet/transactions", h.handleWalletTransactions)
 		r.Get("/team/members", h.handleTeamMembers)
+		r.Get("/team/summary", h.handleTeamSummary)
 		r.Post("/videos/uploads", h.handleVideoUpload)
 		r.Post("/videos", h.handleVideoConfirm)
 		r.Get("/me/videos", h.handleMyVideos)

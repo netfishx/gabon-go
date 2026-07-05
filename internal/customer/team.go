@@ -69,3 +69,46 @@ func relativeDepth(ancestors []int64, viewerID int64) int {
 	}
 	return 0
 }
+
+// teamDepthLevels 团队汇总恒定返回深度 1–3 三层（空层补零）。
+const teamDepthLevels = 3
+
+// TeamLayer 团队某一深度的聚合。
+type TeamLayer struct {
+	Depth      int   `json:"depth"`
+	Count      int64 `json:"count"`
+	ValidCount int64 `json:"valid_count"`
+}
+
+// TeamSummary 团队汇总：各级人数/有效人数、总人数、查看者累计邀请奖励。
+type TeamSummary struct {
+	Total             int64       `json:"total"`
+	TotalValid        int64       `json:"total_valid"`
+	InviteRewardTotal int64       `json:"invite_reward_total"`
+	Layers            []TeamLayer `json:"layers"`
+}
+
+// GetTeamSummary 聚合查看者团队（3 级以内）与累计邀请奖励（流水现算，无缓存）。
+func (s *Service) GetTeamSummary(ctx context.Context, viewerID int64) (*TeamSummary, error) {
+	rows, err := s.q.TeamSummaryByDepth(ctx, viewerID)
+	if err != nil {
+		return nil, fmt.Errorf("team summary by depth: %w", err)
+	}
+	sum := &TeamSummary{Layers: make([]TeamLayer, teamDepthLevels)}
+	for i := range sum.Layers {
+		sum.Layers[i].Depth = i + 1
+	}
+	for _, r := range rows {
+		l := &sum.Layers[r.Depth-1]
+		l.Count = r.MemberCount
+		l.ValidCount = r.ValidCount
+		sum.Total += r.MemberCount
+		sum.TotalValid += r.ValidCount
+	}
+	reward, err := s.q.SumInviteRewards(ctx, viewerID)
+	if err != nil {
+		return nil, fmt.Errorf("sum invite rewards: %w", err)
+	}
+	sum.InviteRewardTotal = reward
+	return sum, nil
+}

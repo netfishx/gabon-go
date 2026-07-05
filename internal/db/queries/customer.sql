@@ -55,6 +55,24 @@ WHERE c.inviter_id = sqlc.arg('parent_id')
 ORDER BY c.id
 LIMIT sqlc.arg('row_limit');
 
+-- name: TeamSummaryByDepth :many
+-- 团队（3 级以内）按深度聚合人数与有效人数：物化祖先路径 && 走 GIN，
+-- 深度 = 路径长度 - viewer 在路径中的位置 + 1。
+SELECT (cardinality(c.ancestors) - array_position(c.ancestors, @viewer_id::bigint) + 1)::int AS depth,
+       COUNT(*)::bigint AS member_count,
+       (COUNT(*) FILTER (WHERE c.valid_at IS NOT NULL))::bigint AS valid_count
+FROM customers c
+WHERE c.ancestors && ARRAY[@viewer_id::bigint]
+  AND c.deleted_at IS NULL
+  AND cardinality(c.ancestors) - array_position(c.ancestors, @viewer_id::bigint) + 1 <= 3
+GROUP BY 1
+ORDER BY 1;
+
+-- name: SumInviteRewards :one
+-- 查看者累计邀请奖励（流水现算；SUM 空集为 NULL，COALESCE 归 0 是 SQL 语义而非业务兜底）。
+SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions
+WHERE customer_id = $1 AND type = 'invite_valid_reward';
+
 -- name: UpdateCustomerProfile :one
 UPDATE customers
 SET name       = COALESCE(sqlc.narg('name'), name),
