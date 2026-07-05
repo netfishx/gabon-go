@@ -30,6 +30,10 @@ type Service struct {
 	pool  *pgxpool.Pool
 	q     *db.Queries
 	store *storage.Store
+
+	// OnApproved 审核通过钩子（装配层注入，可空）：与视频发布、作者 video_count+1 同事务执行。
+	// M4 有效用户判定挂此处；video 不得依赖 customer（骨架依赖方向），故以回调解耦。
+	OnApproved func(ctx context.Context, tx pgx.Tx, authorID int64) error
 }
 
 // NewService 构造视频域服务。

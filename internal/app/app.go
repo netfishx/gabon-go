@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/admin"
@@ -65,10 +66,16 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret)
 
+	customers := customer.NewService(pool)
 	videoSvc := video.NewService(pool, store)
+	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
+	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
+		_, err := customers.MarkValidIfQualifiedTx(ctx, tx, authorID)
+		return err
+	}
 
 	apiHandler := &api.Handler{
-		Customers: customer.NewService(pool),
+		Customers: customers,
 		Tokens:    tokens,
 		Reports:   report.NewService(pool),
 		Wallets:   wallet.NewService(pool),

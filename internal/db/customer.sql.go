@@ -9,6 +9,18 @@ import (
 	"context"
 )
 
+const countValidInvitees = `-- name: CountValidInvitees :one
+SELECT COUNT(*) FROM customers
+WHERE inviter_id = $1 AND valid_at IS NOT NULL AND deleted_at IS NULL
+`
+
+func (q *Queries) CountValidInvitees(ctx context.Context, inviterID *int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countValidInvitees, inviterID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCustomer = `-- name: CreateCustomer :one
 INSERT INTO customers (public_id, username, password_hash, invite_code, inviter_id, ancestors)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -219,6 +231,25 @@ UPDATE customers SET invite_count = invite_count + 1, updated_at = now() WHERE i
 func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, incrementInviteCount, id)
 	return err
+}
+
+const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :execrows
+UPDATE customers
+SET valid_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+  AND valid_at IS NULL
+  AND video_count > 0
+  AND invite_count > 0
+  AND (phone IS NOT NULL OR email IS NOT NULL)
+`
+
+// 有效用户判定（CAS）：三条件全下沉 SQL 原子完成，valid_at IS NULL 保证只翻转一次、永不回退。
+func (q *Queries) MarkCustomerValidIfQualified(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, markCustomerValidIfQualified, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setCustomerLastLogin = `-- name: SetCustomerLastLogin :exec

@@ -91,6 +91,10 @@ func (s *Service) Register(ctx context.Context, username, password, inviteCode s
 				if err := q.IncrementInviteCount(ctx, *inviterID); err != nil {
 					return err
 				}
+				// 邀请人总邀请数刚 +1，可能因此凑齐有效用户条件
+				if _, err := s.MarkValidIfQualifiedTx(ctx, tx, *inviterID); err != nil {
+					return err
+				}
 			}
 			created = c
 			return nil

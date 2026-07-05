@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
 )
@@ -20,17 +22,31 @@ type ProfileUpdate struct {
 
 // UpdateProfile 更新客户资料。email 写入侧归一为全小写；
 // 联系方式唯一性由部分唯一索引兜底，撞约束映射为明确冲突错误码。
+// 写入联系方式时在同一事务内对本人做有效用户判定（M4 触发点之一）。
 func (s *Service) UpdateProfile(ctx context.Context, customerID int64, p ProfileUpdate) (*db.Customer, error) {
 	if p.Email != nil {
 		lower := strings.ToLower(*p.Email)
 		p.Email = &lower
 	}
-	c, err := s.q.UpdateCustomerProfile(ctx, db.UpdateCustomerProfileParams{
-		ID:        customerID,
-		Name:      p.Name,
-		Signature: p.Signature,
-		Email:     p.Email,
-		Phone:     p.Phone,
+	var c db.Customer
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		var err error
+		c, err = s.q.WithTx(tx).UpdateCustomerProfile(ctx, db.UpdateCustomerProfileParams{
+			ID:        customerID,
+			Name:      p.Name,
+			Signature: p.Signature,
+			Email:     p.Email,
+			Phone:     p.Phone,
+		})
+		if err != nil {
+			return err
+		}
+		if p.Email != nil || p.Phone != nil {
+			if _, err := s.MarkValidIfQualifiedTx(ctx, tx, customerID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	switch db.UniqueViolationConstraint(err) {
 	case "customers_phone_key":
