@@ -65,18 +65,21 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 
 	tokens := auth.NewTokenIssuer(cfg.JWTSecret)
 
+	videoSvc := video.NewService(pool, store)
+
 	apiHandler := &api.Handler{
 		Customers: customer.NewService(pool),
 		Tokens:    tokens,
 		Reports:   report.NewService(pool),
 		Wallets:   wallet.NewService(pool),
-		Videos:    video.NewService(pool, store),
+		Videos:    videoSvc,
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 
 	adminHandler := &admin.Handler{
 		Admins: admin.NewService(pool),
 		Tokens: tokens,
+		Videos: videoSvc,
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 

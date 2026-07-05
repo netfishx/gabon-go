@@ -28,6 +28,8 @@ const (
 
 	CodeVideoPathForbidden = "VIDEO_PATH_FORBIDDEN"
 	CodeVideoObjectMissing = "VIDEO_OBJECT_MISSING"
+	CodeVideoNotFound      = "VIDEO_NOT_FOUND"
+	CodeVideoNotReviewable = "VIDEO_NOT_REVIEWABLE"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。

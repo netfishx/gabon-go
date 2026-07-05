@@ -9,6 +9,25 @@ import (
 	"context"
 )
 
+const approveVideo = `-- name: ApproveVideo :execrows
+UPDATE videos
+SET status = 'published', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'pending_review'
+`
+
+type ApproveVideoParams struct {
+	ID         int64
+	ReviewedBy *int64
+}
+
+func (q *Queries) ApproveVideo(ctx context.Context, arg ApproveVideoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, approveVideo, arg.ID, arg.ReviewedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createTranscodeJob = `-- name: CreateTranscodeJob :one
 INSERT INTO transcode_jobs (video_id) VALUES ($1)
 RETURNING id, video_id, status, attempts, last_error, started_at, finished_at, created_at
@@ -81,4 +100,130 @@ func (q *Queries) CreateVideo(ctx context.Context, arg CreateVideoParams) (Video
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getVideoByPublicID = `-- name: GetVideoByPublicID :one
+SELECT id, public_id, customer_id, title, tags, storage_path, hls_path, thumbnail_path, duration, width, height, file_size, mime_type, status, reviewed_by, reviewed_at, review_notes, click_count, valid_play_count, like_count, comment_count, hot_score, deleted_at, created_at, updated_at FROM videos WHERE public_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetVideoByPublicID(ctx context.Context, publicID string) (Video, error) {
+	row := q.db.QueryRow(ctx, getVideoByPublicID, publicID)
+	var i Video
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.CustomerID,
+		&i.Title,
+		&i.Tags,
+		&i.StoragePath,
+		&i.HlsPath,
+		&i.ThumbnailPath,
+		&i.Duration,
+		&i.Width,
+		&i.Height,
+		&i.FileSize,
+		&i.MimeType,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.ReviewNotes,
+		&i.ClickCount,
+		&i.ValidPlayCount,
+		&i.LikeCount,
+		&i.CommentCount,
+		&i.HotScore,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const incrementVideoCount = `-- name: IncrementVideoCount :exec
+UPDATE customers SET video_count = video_count + 1, updated_at = now() WHERE id = $1
+`
+
+func (q *Queries) IncrementVideoCount(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, incrementVideoCount, id)
+	return err
+}
+
+const listPendingReviewVideos = `-- name: ListPendingReviewVideos :many
+SELECT id, public_id, customer_id, title, tags, storage_path, hls_path, thumbnail_path, duration, width, height, file_size, mime_type, status, reviewed_by, reviewed_at, review_notes, click_count, valid_play_count, like_count, comment_count, hot_score, deleted_at, created_at, updated_at FROM videos
+WHERE status = 'pending_review' AND deleted_at IS NULL
+  AND ($1::bigint = 0 OR id > $1)
+ORDER BY id
+LIMIT $2
+`
+
+type ListPendingReviewVideosParams struct {
+	Cursor   int64
+	RowLimit int32
+}
+
+func (q *Queries) ListPendingReviewVideos(ctx context.Context, arg ListPendingReviewVideosParams) ([]Video, error) {
+	rows, err := q.db.Query(ctx, listPendingReviewVideos, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Video
+	for rows.Next() {
+		var i Video
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.CustomerID,
+			&i.Title,
+			&i.Tags,
+			&i.StoragePath,
+			&i.HlsPath,
+			&i.ThumbnailPath,
+			&i.Duration,
+			&i.Width,
+			&i.Height,
+			&i.FileSize,
+			&i.MimeType,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.ReviewNotes,
+			&i.ClickCount,
+			&i.ValidPlayCount,
+			&i.LikeCount,
+			&i.CommentCount,
+			&i.HotScore,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const rejectVideo = `-- name: RejectVideo :execrows
+UPDATE videos
+SET status = 'rejected', reviewed_by = $2, reviewed_at = now(),
+    review_notes = $3, updated_at = now()
+WHERE id = $1 AND status = 'pending_review'
+`
+
+type RejectVideoParams struct {
+	ID          int64
+	ReviewedBy  *int64
+	ReviewNotes *string
+}
+
+func (q *Queries) RejectVideo(ctx context.Context, arg RejectVideoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rejectVideo, arg.ID, arg.ReviewedBy, arg.ReviewNotes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
