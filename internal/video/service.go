@@ -20,9 +20,10 @@ import (
 const (
 	maxTags       = 3
 	presignExpiry = 15 * time.Minute
-	// 原片路径约定：videos/{customerID}/{random}.mp4——归属内嵌，confirm 时校验前缀
-	rawPathPattern = "videos/%d/%s.mp4"
 )
+
+// 原片扩展名白名单（schema.md 路径约定 {kind}/{customer_id}/{random}.{ext}）
+var allowedExts = map[string]bool{"mp4": true, "mov": true, "m4v": true, "webm": true}
 
 // Service 视频域服务。
 type Service struct {
@@ -37,12 +38,20 @@ func NewService(pool *pgxpool.Pool, store *storage.Store) *Service {
 }
 
 // CreateUpload 生成原片预签名 PUT 地址与存储路径。
-func (s *Service) CreateUpload(ctx context.Context, customerID int64) (storagePath, uploadURL string, err error) {
+// ext 为客户端申报的容器扩展名（白名单校验，空值默认 mp4）——仅参与路径命名，
+// 转码由 ffmpeg 按内容探测，不信任后缀。
+func (s *Service) CreateUpload(ctx context.Context, customerID int64, ext string) (storagePath, uploadURL string, err error) {
+	if ext == "" {
+		ext = "mp4"
+	}
+	if !allowedExts[ext] {
+		return "", "", apierr.InvalidArgument("unsupported ext, allowed: mp4/mov/m4v/webm")
+	}
 	name, err := shortcode.New(shortcode.Base58, 16)
 	if err != nil {
 		return "", "", err
 	}
-	storagePath = fmt.Sprintf(rawPathPattern, customerID, name)
+	storagePath = fmt.Sprintf("videos/%d/%s.%s", customerID, name, ext)
 	uploadURL, err = s.store.PresignPut(ctx, storagePath, presignExpiry)
 	if err != nil {
 		return "", "", err

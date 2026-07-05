@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/pagination"
 )
 
 func (h *Handler) handleLike(w http.ResponseWriter, r *http.Request) {
@@ -70,12 +71,14 @@ func (h *Handler) handleDeleteComment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleComments(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseBrowseLimit(w, r)
-	if !ok {
+	limit, err := pagination.Limit(r, browseDefaultLimit, browseMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
-	cursor, ok := parseInt64Cursor(w, r)
-	if !ok {
+	cursor, err := pagination.Cursor(r)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
 	rows, next, err := h.Videos.Comments(r.Context(), chi.URLParam(r, "publicID"), cursor, limit)
@@ -92,7 +95,7 @@ func (h *Handler) handleComments(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: row.CreatedAt.Time,
 		})
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": omitZero(next)})
+	apierr.WriteJSON(w, http.StatusOK, pagination.Page[commentItem]{Items: items, NextCursor: next})
 }
 
 func (h *Handler) handlePlay(w http.ResponseWriter, r *http.Request) {

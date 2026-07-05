@@ -11,12 +11,24 @@ import (
 
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/pagination"
 )
 
 const (
 	browseDefaultLimit = 20
 	browseMaxLimit     = 100
 )
+
+type feedResponse struct {
+	Items      []browseItem `json:"items"`
+	Seed       string       `json:"seed"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+}
+
+type featuredResponse struct {
+	Items      []browseItem `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+}
 
 type authorInfo struct {
 	PublicID string `json:"public_id"`
@@ -63,22 +75,10 @@ func (h *Handler) toBrowseItem(v db.Video, authorPublicID, authorUsername string
 	}
 }
 
-func parseBrowseLimit(w http.ResponseWriter, r *http.Request) (int32, bool) {
-	limit := int32(browseDefaultLimit)
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 32)
-		if err != nil || n <= 0 {
-			apierr.Write(w, apierr.InvalidArgument("limit must be a positive integer"))
-			return 0, false
-		}
-		limit = int32(min(n, browseMaxLimit))
-	}
-	return limit, true
-}
-
 func (h *Handler) handleFeed(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseBrowseLimit(w, r)
-	if !ok {
+	limit, err := pagination.Limit(r, browseDefaultLimit, browseMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
 	rows, seed, next, err := h.Videos.Feed(r.Context(),
@@ -91,23 +91,13 @@ func (h *Handler) handleFeed(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, h.toBrowseItem(row.Video, row.AuthorPublicID, row.AuthorUsername))
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{
-		"items": items, "seed": seed,
-		"next_cursor": omitEmpty(next),
-	})
-}
-
-// omitEmpty 让空游标从 JSON 里消失（map 形态下的 omitempty 替代）
-func omitEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
+	apierr.WriteJSON(w, http.StatusOK, feedResponse{Items: items, Seed: seed, NextCursor: next})
 }
 
 func (h *Handler) handleFeatured(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseBrowseLimit(w, r)
-	if !ok {
+	limit, err := pagination.Limit(r, browseDefaultLimit, browseMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
 	var cursorScore, cursorID int64
@@ -132,11 +122,11 @@ func (h *Handler) handleFeatured(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, h.toBrowseItem(row.Video, row.AuthorPublicID, row.AuthorUsername))
 	}
-	var next any
+	var next string
 	if nextID != 0 {
 		next = fmt.Sprintf("%d-%d", nextScore, nextID)
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": next})
+	apierr.WriteJSON(w, http.StatusOK, featuredResponse{Items: items, NextCursor: next})
 }
 
 func (h *Handler) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
@@ -157,12 +147,14 @@ func (h *Handler) handleVideoDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleCustomerVideos(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseBrowseLimit(w, r)
-	if !ok {
+	limit, err := pagination.Limit(r, browseDefaultLimit, browseMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
-	cursor, ok := parseInt64Cursor(w, r)
-	if !ok {
+	cursor, err := pagination.Cursor(r)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
 	c, err := h.Customers.GetByPublicID(r.Context(), chi.URLParam(r, "publicID"))
@@ -179,27 +171,7 @@ func (h *Handler) handleCustomerVideos(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, h.toBrowseItem(row.Video, row.AuthorPublicID, row.AuthorUsername))
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": omitZero(next)})
-}
-
-func parseInt64Cursor(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	raw := r.URL.Query().Get("cursor")
-	if raw == "" {
-		return 0, true
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n < 0 {
-		apierr.Write(w, apierr.InvalidArgument("cursor must be a non-negative integer"))
-		return 0, false
-	}
-	return n, true
-}
-
-func omitZero(n int64) any {
-	if n == 0 {
-		return nil
-	}
-	return n
+	apierr.WriteJSON(w, http.StatusOK, pagination.Page[browseItem]{Items: items, NextCursor: next})
 }
 
 type myVideoItem struct {
@@ -208,12 +180,14 @@ type myVideoItem struct {
 }
 
 func (h *Handler) handleMyVideos(w http.ResponseWriter, r *http.Request) {
-	limit, ok := parseBrowseLimit(w, r)
-	if !ok {
+	limit, err := pagination.Limit(r, browseDefaultLimit, browseMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
-	cursor, ok := parseInt64Cursor(w, r)
-	if !ok {
+	cursor, err := pagination.Cursor(r)
+	if err != nil {
+		apierr.Write(w, err)
 		return
 	}
 	c := customerFrom(r.Context())
@@ -229,7 +203,7 @@ func (h *Handler) handleMyVideos(w http.ResponseWriter, r *http.Request) {
 			Status:     string(v.Status),
 		})
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items, "next_cursor": omitZero(next)})
+	apierr.WriteJSON(w, http.StatusOK, pagination.Page[myVideoItem]{Items: items, NextCursor: next})
 }
 
 func (h *Handler) handleDeleteVideo(w http.ResponseWriter, r *http.Request) {

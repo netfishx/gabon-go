@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -8,13 +11,23 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
+type uploadRequest struct {
+	Ext string `json:"ext"`
+}
+
 type uploadResponse struct {
 	StoragePath string `json:"storage_path"`
 	UploadURL   string `json:"upload_url"`
 }
 
 func (h *Handler) handleVideoUpload(w http.ResponseWriter, r *http.Request) {
-	path, url, err := h.Videos.CreateUpload(r.Context(), customerFrom(r.Context()).ID)
+	var req uploadRequest
+	// body 可选：空 body 走默认扩展名
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		apierr.Write(w, apierr.InvalidArgument("malformed JSON body"))
+		return
+	}
+	path, url, err := h.Videos.CreateUpload(r.Context(), customerFrom(r.Context()).ID, req.Ext)
 	if err != nil {
 		apierr.Write(w, err)
 		return

@@ -2,13 +2,13 @@ package admin
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/pagination"
 )
 
 const (
@@ -23,29 +23,16 @@ type pendingVideoItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type pendingVideosResponse struct {
-	Items      []pendingVideoItem `json:"items"`
-	NextCursor int64              `json:"next_cursor,omitempty"`
-}
-
 func (h *Handler) handlePendingVideos(w http.ResponseWriter, r *http.Request) {
-	limit := int32(pendingDefaultLimit)
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 32)
-		if err != nil || n <= 0 {
-			apierr.Write(w, apierr.InvalidArgument("limit must be a positive integer"))
-			return
-		}
-		limit = int32(min(n, pendingMaxLimit))
+	limit, err := pagination.Limit(r, pendingDefaultLimit, pendingMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
+		return
 	}
-	var cursor int64
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || n < 0 {
-			apierr.Write(w, apierr.InvalidArgument("cursor must be a non-negative integer"))
-			return
-		}
-		cursor = n
+	cursor, err := pagination.Cursor(r)
+	if err != nil {
+		apierr.Write(w, err)
+		return
 	}
 
 	items, next, err := h.Videos.ListPendingReview(r.Context(), cursor, limit)
@@ -53,7 +40,7 @@ func (h *Handler) handlePendingVideos(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	out := pendingVideosResponse{Items: make([]pendingVideoItem, 0, len(items)), NextCursor: next}
+	out := pagination.Page[pendingVideoItem]{Items: make([]pendingVideoItem, 0, len(items)), NextCursor: next}
 	for _, v := range items {
 		out.Items = append(out.Items, toPendingVideoItem(v))
 	}

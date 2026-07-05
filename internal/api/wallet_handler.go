@@ -2,11 +2,11 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/pagination"
 )
 
 type walletResponse struct {
@@ -40,29 +40,16 @@ type transactionItem struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-type transactionsResponse struct {
-	Items      []transactionItem `json:"items"`
-	NextCursor int64             `json:"next_cursor,omitempty"`
-}
-
 func (h *Handler) handleWalletTransactions(w http.ResponseWriter, r *http.Request) {
-	limit := int32(transactionsDefaultLimit)
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 32)
-		if err != nil || n <= 0 {
-			apierr.Write(w, apierr.InvalidArgument("limit must be a positive integer"))
-			return
-		}
-		limit = int32(min(n, transactionsMaxLimit))
+	limit, err := pagination.Limit(r, transactionsDefaultLimit, transactionsMaxLimit)
+	if err != nil {
+		apierr.Write(w, err)
+		return
 	}
-	var cursor int64
-	if raw := r.URL.Query().Get("cursor"); raw != "" {
-		n, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || n < 0 {
-			apierr.Write(w, apierr.InvalidArgument("cursor must be a non-negative integer"))
-			return
-		}
-		cursor = n
+	cursor, err := pagination.Cursor(r)
+	if err != nil {
+		apierr.Write(w, err)
+		return
 	}
 
 	items, next, err := h.Wallets.ListTransactions(r.Context(), customerFrom(r.Context()).ID, cursor, limit)
@@ -70,7 +57,7 @@ func (h *Handler) handleWalletTransactions(w http.ResponseWriter, r *http.Reques
 		apierr.Write(w, err)
 		return
 	}
-	out := transactionsResponse{Items: make([]transactionItem, 0, len(items)), NextCursor: next}
+	out := pagination.Page[transactionItem]{Items: make([]transactionItem, 0, len(items)), NextCursor: next}
 	for _, tx := range items {
 		out.Items = append(out.Items, transactionItem{
 			ID:           tx.ID,
