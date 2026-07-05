@@ -60,7 +60,8 @@ func NewFFmpeg(store *storage.Store) Func {
 			return Result{}, fmt.Errorf("ffmpeg thumbnail: %w: %s", err, tail(out))
 		}
 
-		hlsPrefix := fmt.Sprintf("hls/%d", video.ID)
+		// 产物路径用公开短码：路径会进对外 CDN URL，不得泄漏内部自增 id（schema 契约）
+		hlsPrefix := "hls/" + video.PublicID
 		entries, err := os.ReadDir(outDir)
 		if err != nil {
 			return Result{}, fmt.Errorf("read out dir: %w", err)
@@ -76,7 +77,7 @@ func NewFFmpeg(store *storage.Store) Func {
 				return Result{}, err
 			}
 		}
-		thumbPath := fmt.Sprintf("thumbs/%d.jpg", video.ID)
+		thumbPath := "thumbs/" + video.PublicID + ".jpg"
 		if err := store.UploadFile(ctx, thumb, thumbPath, "image/jpeg"); err != nil {
 			return Result{}, err
 		}

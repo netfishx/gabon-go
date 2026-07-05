@@ -81,6 +81,26 @@ func (w *Worker) Start(ctx context.Context) error {
 			}
 		}()
 	}
+
+	// 周期恢复：覆盖 kill -9 等未走优雅停机的搁浅（启动恢复只跑一次不够）
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		ticker := time.NewTicker(w.opts.JobTimeout)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := w.RecoverStale(ctx); err != nil {
+					slog.ErrorContext(ctx, "transcode: periodic recover failed", "error", err)
+				} else if n > 0 {
+					slog.Info("transcode: requeued stale jobs", "count", n)
+				}
+			}
+		}
+	}()
 	return nil
 }
 
@@ -137,14 +157,17 @@ func (w *Worker) ProcessOne(ctx context.Context) bool {
 	runCtx, cancel := context.WithTimeout(ctx, w.opts.JobTimeout)
 	result, err := w.opts.Transcode(runCtx, video)
 	cancel()
+	// 转码后的收尾写入必须在停机（ctx 已取消）时仍能落库，否则在途任务卡死在 running，
+	// 而启动恢复只扫 2×超时以前的任务——快速重启会无限期搁浅（review P2 回归）
+	dbCtx := context.WithoutCancel(ctx)
 	if err != nil {
 		slog.WarnContext(ctx, "transcode: attempt failed",
 			"job_id", job.ID, "video_id", video.ID, "attempt", job.Attempts, "error", err)
-		w.finishFailure(ctx, job, err.Error())
+		w.finishFailure(dbCtx, job, err.Error())
 		return true
 	}
 
-	err = pgx.BeginFunc(ctx, w.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(dbCtx, w.pool, func(tx pgx.Tx) error {
 		q := w.q.WithTx(tx)
 		if err := q.SucceedTranscodeJob(ctx, job.ID); err != nil {
 			return err

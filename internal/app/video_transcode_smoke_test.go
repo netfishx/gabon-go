@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -59,6 +60,10 @@ func TestTranscodePipelineSmoke(t *testing.T) {
 	}
 	if hlsPath == nil || thumbPath == nil || duration == nil {
 		t.Fatalf("media fields missing: hls=%v thumb=%v dur=%v", hlsPath, thumbPath, duration)
+	}
+	// 对外契约：媒体路径（进 CDN URL）只允许公开短码，不得泄漏内部自增 id
+	if !strings.Contains(*hlsPath, publicID) || !strings.Contains(*thumbPath, publicID) {
+		t.Errorf("media paths must use public_id: hls=%s thumb=%s public_id=%s", *hlsPath, *thumbPath, publicID)
 	}
 	if *duration < 1 {
 		t.Errorf("duration = %d, want >= 1", *duration)
