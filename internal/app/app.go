@@ -73,6 +73,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Reports:   report.NewService(pool),
 		Wallets:   wallet.NewService(pool),
 		Videos:    videoSvc,
+		CDNBase:   cfg.CDNBaseURL,
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
 

@@ -18,6 +18,7 @@ type Handler struct {
 	Reports   *report.Service
 	Wallets   *wallet.Service
 	Videos    *video.Service
+	CDNBase   string
 }
 
 // Routes 组装客户面路由。
@@ -25,6 +26,12 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/auth/register", h.handleRegister)
 	r.Post("/auth/login", h.handleLogin)
+
+	// 公开浏览面：Feed/精选/详情/他人主页
+	r.Get("/feed", h.handleFeed)
+	r.Get("/featured", h.handleFeatured)
+	r.Get("/videos/{publicID}", h.handleVideoDetail)
+	r.Get("/customers/{publicID}/videos", h.handleCustomerVideos)
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireCustomer, h.recordActive)
@@ -35,6 +42,8 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/wallet/transactions", h.handleWalletTransactions)
 		r.Post("/videos/uploads", h.handleVideoUpload)
 		r.Post("/videos", h.handleVideoConfirm)
+		r.Get("/me/videos", h.handleMyVideos)
+		r.Delete("/videos/{publicID}", h.handleDeleteVideo)
 	})
 	return r
 }

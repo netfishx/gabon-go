@@ -102,6 +102,54 @@ func (q *Queries) CreateVideo(ctx context.Context, arg CreateVideoParams) (Video
 	return i, err
 }
 
+const getPublishedVideoByPublicID = `-- name: GetPublishedVideoByPublicID :one
+SELECT v.id, v.public_id, v.customer_id, v.title, v.tags, v.storage_path, v.hls_path, v.thumbnail_path, v.duration, v.width, v.height, v.file_size, v.mime_type, v.status, v.reviewed_by, v.reviewed_at, v.review_notes, v.click_count, v.valid_play_count, v.like_count, v.comment_count, v.hot_score, v.deleted_at, v.created_at, v.updated_at, c.public_id AS author_public_id, c.username AS author_username
+FROM videos v
+JOIN customers c ON c.id = v.customer_id
+WHERE v.public_id = $1 AND v.status = 'published' AND v.deleted_at IS NULL
+`
+
+type GetPublishedVideoByPublicIDRow struct {
+	Video          Video
+	AuthorPublicID string
+	AuthorUsername string
+}
+
+func (q *Queries) GetPublishedVideoByPublicID(ctx context.Context, publicID string) (GetPublishedVideoByPublicIDRow, error) {
+	row := q.db.QueryRow(ctx, getPublishedVideoByPublicID, publicID)
+	var i GetPublishedVideoByPublicIDRow
+	err := row.Scan(
+		&i.Video.ID,
+		&i.Video.PublicID,
+		&i.Video.CustomerID,
+		&i.Video.Title,
+		&i.Video.Tags,
+		&i.Video.StoragePath,
+		&i.Video.HlsPath,
+		&i.Video.ThumbnailPath,
+		&i.Video.Duration,
+		&i.Video.Width,
+		&i.Video.Height,
+		&i.Video.FileSize,
+		&i.Video.MimeType,
+		&i.Video.Status,
+		&i.Video.ReviewedBy,
+		&i.Video.ReviewedAt,
+		&i.Video.ReviewNotes,
+		&i.Video.ClickCount,
+		&i.Video.ValidPlayCount,
+		&i.Video.LikeCount,
+		&i.Video.CommentCount,
+		&i.Video.HotScore,
+		&i.Video.DeletedAt,
+		&i.Video.CreatedAt,
+		&i.Video.UpdatedAt,
+		&i.AuthorPublicID,
+		&i.AuthorUsername,
+	)
+	return i, err
+}
+
 const getVideoByPublicID = `-- name: GetVideoByPublicID :one
 SELECT id, public_id, customer_id, title, tags, storage_path, hls_path, thumbnail_path, duration, width, height, file_size, mime_type, status, reviewed_by, reviewed_at, review_notes, click_count, valid_play_count, like_count, comment_count, hot_score, deleted_at, created_at, updated_at FROM videos WHERE public_id = $1 AND deleted_at IS NULL
 `
@@ -146,6 +194,281 @@ UPDATE customers SET video_count = video_count + 1, updated_at = now() WHERE id 
 func (q *Queries) IncrementVideoCount(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, incrementVideoCount, id)
 	return err
+}
+
+const listCustomerPublishedVideos = `-- name: ListCustomerPublishedVideos :many
+SELECT v.id, v.public_id, v.customer_id, v.title, v.tags, v.storage_path, v.hls_path, v.thumbnail_path, v.duration, v.width, v.height, v.file_size, v.mime_type, v.status, v.reviewed_by, v.reviewed_at, v.review_notes, v.click_count, v.valid_play_count, v.like_count, v.comment_count, v.hot_score, v.deleted_at, v.created_at, v.updated_at, c.public_id AS author_public_id, c.username AS author_username
+FROM videos v
+JOIN customers c ON c.id = v.customer_id
+WHERE v.customer_id = $1 AND v.status = 'published' AND v.deleted_at IS NULL
+  AND ($2::bigint = 0 OR v.id < $2)
+ORDER BY v.id DESC
+LIMIT $3
+`
+
+type ListCustomerPublishedVideosParams struct {
+	CustomerID int64
+	Cursor     int64
+	RowLimit   int32
+}
+
+type ListCustomerPublishedVideosRow struct {
+	Video          Video
+	AuthorPublicID string
+	AuthorUsername string
+}
+
+func (q *Queries) ListCustomerPublishedVideos(ctx context.Context, arg ListCustomerPublishedVideosParams) ([]ListCustomerPublishedVideosRow, error) {
+	rows, err := q.db.Query(ctx, listCustomerPublishedVideos, arg.CustomerID, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCustomerPublishedVideosRow
+	for rows.Next() {
+		var i ListCustomerPublishedVideosRow
+		if err := rows.Scan(
+			&i.Video.ID,
+			&i.Video.PublicID,
+			&i.Video.CustomerID,
+			&i.Video.Title,
+			&i.Video.Tags,
+			&i.Video.StoragePath,
+			&i.Video.HlsPath,
+			&i.Video.ThumbnailPath,
+			&i.Video.Duration,
+			&i.Video.Width,
+			&i.Video.Height,
+			&i.Video.FileSize,
+			&i.Video.MimeType,
+			&i.Video.Status,
+			&i.Video.ReviewedBy,
+			&i.Video.ReviewedAt,
+			&i.Video.ReviewNotes,
+			&i.Video.ClickCount,
+			&i.Video.ValidPlayCount,
+			&i.Video.LikeCount,
+			&i.Video.CommentCount,
+			&i.Video.HotScore,
+			&i.Video.DeletedAt,
+			&i.Video.CreatedAt,
+			&i.Video.UpdatedAt,
+			&i.AuthorPublicID,
+			&i.AuthorUsername,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFeaturedVideos = `-- name: ListFeaturedVideos :many
+SELECT v.id, v.public_id, v.customer_id, v.title, v.tags, v.storage_path, v.hls_path, v.thumbnail_path, v.duration, v.width, v.height, v.file_size, v.mime_type, v.status, v.reviewed_by, v.reviewed_at, v.review_notes, v.click_count, v.valid_play_count, v.like_count, v.comment_count, v.hot_score, v.deleted_at, v.created_at, v.updated_at, c.public_id AS author_public_id, c.username AS author_username
+FROM videos v
+JOIN customers c ON c.id = v.customer_id
+WHERE v.status = 'published' AND v.deleted_at IS NULL
+  AND ($1::bigint = 0
+       OR (v.hot_score, v.id) < ($2::bigint, $1::bigint))
+ORDER BY v.hot_score DESC, v.id DESC
+LIMIT $3
+`
+
+type ListFeaturedVideosParams struct {
+	CursorID    int64
+	CursorScore int64
+	RowLimit    int32
+}
+
+type ListFeaturedVideosRow struct {
+	Video          Video
+	AuthorPublicID string
+	AuthorUsername string
+}
+
+func (q *Queries) ListFeaturedVideos(ctx context.Context, arg ListFeaturedVideosParams) ([]ListFeaturedVideosRow, error) {
+	rows, err := q.db.Query(ctx, listFeaturedVideos, arg.CursorID, arg.CursorScore, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFeaturedVideosRow
+	for rows.Next() {
+		var i ListFeaturedVideosRow
+		if err := rows.Scan(
+			&i.Video.ID,
+			&i.Video.PublicID,
+			&i.Video.CustomerID,
+			&i.Video.Title,
+			&i.Video.Tags,
+			&i.Video.StoragePath,
+			&i.Video.HlsPath,
+			&i.Video.ThumbnailPath,
+			&i.Video.Duration,
+			&i.Video.Width,
+			&i.Video.Height,
+			&i.Video.FileSize,
+			&i.Video.MimeType,
+			&i.Video.Status,
+			&i.Video.ReviewedBy,
+			&i.Video.ReviewedAt,
+			&i.Video.ReviewNotes,
+			&i.Video.ClickCount,
+			&i.Video.ValidPlayCount,
+			&i.Video.LikeCount,
+			&i.Video.CommentCount,
+			&i.Video.HotScore,
+			&i.Video.DeletedAt,
+			&i.Video.CreatedAt,
+			&i.Video.UpdatedAt,
+			&i.AuthorPublicID,
+			&i.AuthorUsername,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFeedVideos = `-- name: ListFeedVideos :many
+SELECT v.id, v.public_id, v.customer_id, v.title, v.tags, v.storage_path, v.hls_path, v.thumbnail_path, v.duration, v.width, v.height, v.file_size, v.mime_type, v.status, v.reviewed_by, v.reviewed_at, v.review_notes, v.click_count, v.valid_play_count, v.like_count, v.comment_count, v.hot_score, v.deleted_at, v.created_at, v.updated_at, c.public_id AS author_public_id, c.username AS author_username,
+       md5(v.id::text || $1::text) AS feed_rank
+FROM videos v
+JOIN customers c ON c.id = v.customer_id
+WHERE v.status = 'published' AND v.deleted_at IS NULL
+  AND ($2::text = '' OR md5(v.id::text || $1::text) > $2)
+ORDER BY feed_rank
+LIMIT $3
+`
+
+type ListFeedVideosParams struct {
+	Seed     string
+	Cursor   string
+	RowLimit int32
+}
+
+type ListFeedVideosRow struct {
+	Video          Video
+	AuthorPublicID string
+	AuthorUsername string
+	FeedRank       string
+}
+
+// Feed 默认流：md5(id||seed) 伪随机序（行为差异 #3）——seed 固定则序稳定，游标为上页末行 rank
+func (q *Queries) ListFeedVideos(ctx context.Context, arg ListFeedVideosParams) ([]ListFeedVideosRow, error) {
+	rows, err := q.db.Query(ctx, listFeedVideos, arg.Seed, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFeedVideosRow
+	for rows.Next() {
+		var i ListFeedVideosRow
+		if err := rows.Scan(
+			&i.Video.ID,
+			&i.Video.PublicID,
+			&i.Video.CustomerID,
+			&i.Video.Title,
+			&i.Video.Tags,
+			&i.Video.StoragePath,
+			&i.Video.HlsPath,
+			&i.Video.ThumbnailPath,
+			&i.Video.Duration,
+			&i.Video.Width,
+			&i.Video.Height,
+			&i.Video.FileSize,
+			&i.Video.MimeType,
+			&i.Video.Status,
+			&i.Video.ReviewedBy,
+			&i.Video.ReviewedAt,
+			&i.Video.ReviewNotes,
+			&i.Video.ClickCount,
+			&i.Video.ValidPlayCount,
+			&i.Video.LikeCount,
+			&i.Video.CommentCount,
+			&i.Video.HotScore,
+			&i.Video.DeletedAt,
+			&i.Video.CreatedAt,
+			&i.Video.UpdatedAt,
+			&i.AuthorPublicID,
+			&i.AuthorUsername,
+			&i.FeedRank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMyVideos = `-- name: ListMyVideos :many
+SELECT id, public_id, customer_id, title, tags, storage_path, hls_path, thumbnail_path, duration, width, height, file_size, mime_type, status, reviewed_by, reviewed_at, review_notes, click_count, valid_play_count, like_count, comment_count, hot_score, deleted_at, created_at, updated_at FROM videos
+WHERE customer_id = $1 AND deleted_at IS NULL
+  AND ($2::bigint = 0 OR id < $2)
+ORDER BY id DESC
+LIMIT $3
+`
+
+type ListMyVideosParams struct {
+	CustomerID int64
+	Cursor     int64
+	RowLimit   int32
+}
+
+func (q *Queries) ListMyVideos(ctx context.Context, arg ListMyVideosParams) ([]Video, error) {
+	rows, err := q.db.Query(ctx, listMyVideos, arg.CustomerID, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Video
+	for rows.Next() {
+		var i Video
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.CustomerID,
+			&i.Title,
+			&i.Tags,
+			&i.StoragePath,
+			&i.HlsPath,
+			&i.ThumbnailPath,
+			&i.Duration,
+			&i.Width,
+			&i.Height,
+			&i.FileSize,
+			&i.MimeType,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.ReviewNotes,
+			&i.ClickCount,
+			&i.ValidPlayCount,
+			&i.LikeCount,
+			&i.CommentCount,
+			&i.HotScore,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPendingReviewVideos = `-- name: ListPendingReviewVideos :many
@@ -222,6 +545,24 @@ type RejectVideoParams struct {
 
 func (q *Queries) RejectVideo(ctx context.Context, arg RejectVideoParams) (int64, error) {
 	result, err := q.db.Exec(ctx, rejectVideo, arg.ID, arg.ReviewedBy, arg.ReviewNotes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteVideo = `-- name: SoftDeleteVideo :execrows
+UPDATE videos SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+`
+
+type SoftDeleteVideoParams struct {
+	ID         int64
+	CustomerID int64
+}
+
+func (q *Queries) SoftDeleteVideo(ctx context.Context, arg SoftDeleteVideoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteVideo, arg.ID, arg.CustomerID)
 	if err != nil {
 		return 0, err
 	}

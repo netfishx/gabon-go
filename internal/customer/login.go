@@ -65,6 +65,18 @@ func (s *Service) ChangePassword(ctx context.Context, c *db.Customer, oldPasswor
 	return nil
 }
 
+// GetByPublicID 按公开短码取客户（他人主页等公开面使用）。
+func (s *Service) GetByPublicID(ctx context.Context, publicID string) (*db.Customer, error) {
+	c, err := s.q.GetCustomerByPublicID(ctx, publicID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apierr.New(http.StatusNotFound, apierr.CodeCustomerNotFound, "customer not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get customer by public id: %w", err)
+	}
+	return &c, nil
+}
+
 // GetByID 供鉴权中间件与 /me 使用。
 func (s *Service) GetByID(ctx context.Context, id int64) (*db.Customer, error) {
 	c, err := s.q.GetCustomerByID(ctx, id)

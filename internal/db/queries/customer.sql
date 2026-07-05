@@ -12,6 +12,9 @@ SELECT * FROM customers WHERE username = $1 AND deleted_at IS NULL;
 -- name: GetCustomerByID :one
 SELECT * FROM customers WHERE id = $1 AND deleted_at IS NULL;
 
+-- name: GetCustomerByPublicID :one
+SELECT * FROM customers WHERE public_id = $1 AND deleted_at IS NULL;
+
 -- name: SetCustomerLastLogin :exec
 UPDATE customers SET last_login_at = now(), updated_at = now() WHERE id = $1;
 

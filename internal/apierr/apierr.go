@@ -20,6 +20,7 @@ const (
 
 	CodeAdminDisabled = "ADMIN_DISABLED"
 
+	CodeCustomerNotFound          = "CUSTOMER_NOT_FOUND"
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 	CodeCustomerBanned            = "CUSTOMER_BANNED"

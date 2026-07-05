@@ -138,6 +138,43 @@ func (q *Queries) GetCustomerByInviteCode(ctx context.Context, inviteCode string
 	return i, err
 }
 
+const getCustomerByPublicID = `-- name: GetCustomerByPublicID :one
+SELECT id, public_id, username, password_hash, password_changed_at, name, phone, email, avatar_path, signature, invite_code, inviter_id, ancestors, valid_at, vip_level, status, withdrawal_password_hash, video_count, invite_count, follower_count, following_count, last_login_at, deleted_at, created_at, updated_at FROM customers WHERE public_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetCustomerByPublicID(ctx context.Context, publicID string) (Customer, error) {
+	row := q.db.QueryRow(ctx, getCustomerByPublicID, publicID)
+	var i Customer
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.PasswordChangedAt,
+		&i.Name,
+		&i.Phone,
+		&i.Email,
+		&i.AvatarPath,
+		&i.Signature,
+		&i.InviteCode,
+		&i.InviterID,
+		&i.Ancestors,
+		&i.ValidAt,
+		&i.VipLevel,
+		&i.Status,
+		&i.WithdrawalPasswordHash,
+		&i.VideoCount,
+		&i.InviteCount,
+		&i.FollowerCount,
+		&i.FollowingCount,
+		&i.LastLoginAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCustomerByUsername = `-- name: GetCustomerByUsername :one
 SELECT id, public_id, username, password_hash, password_changed_at, name, phone, email, avatar_path, signature, invite_code, inviter_id, ancestors, valid_at, vip_level, status, withdrawal_password_hash, video_count, invite_count, follower_count, following_count, last_login_at, deleted_at, created_at, updated_at FROM customers WHERE username = $1 AND deleted_at IS NULL
 `
