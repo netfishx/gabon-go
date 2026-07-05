@@ -37,6 +37,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireCustomer, h.recordActive)
 		r.Get("/me", h.handleMe)
+		r.Patch("/me/profile", h.handleUpdateProfile)
 		r.Post("/me/password", h.handleChangePassword)
 		r.Post("/auth/refresh", h.handleRefresh)
 		r.Get("/wallet", h.handleWallet)

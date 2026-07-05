@@ -24,6 +24,8 @@ const (
 	CodeCustomerUsernameTaken     = "CUSTOMER_USERNAME_TAKEN"
 	CodeCustomerInviteCodeInvalid = "CUSTOMER_INVITE_CODE_INVALID"
 	CodeCustomerBanned            = "CUSTOMER_BANNED"
+	CodeCustomerPhoneTaken        = "CUSTOMER_PHONE_TAKEN"
+	CodeCustomerEmailTaken        = "CUSTOMER_EMAIL_TAKEN"
 
 	CodeWalletInsufficientBalance = "WALLET_INSUFFICIENT_BALANCE"
 

@@ -26,6 +26,10 @@ type registerRequest struct {
 type customerResponse struct {
 	PublicID   string    `json:"public_id"`
 	Username   string    `json:"username"`
+	Name       *string   `json:"name"`
+	Signature  *string   `json:"signature"`
+	Email      *string   `json:"email"`
+	Phone      *string   `json:"phone"`
 	InviteCode string    `json:"invite_code"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -34,6 +38,10 @@ func toCustomerResponse(c *db.Customer) customerResponse {
 	return customerResponse{
 		PublicID:   c.PublicID,
 		Username:   c.Username,
+		Name:       c.Name,
+		Signature:  c.Signature,
+		Email:      c.Email,
+		Phone:      c.Phone,
 		InviteCode: c.InviteCode,
 		CreatedAt:  c.CreatedAt.Time,
 	}

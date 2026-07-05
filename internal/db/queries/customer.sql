@@ -25,3 +25,13 @@ WHERE id = $1;
 
 -- name: IncrementInviteCount :exec
 UPDATE customers SET invite_count = invite_count + 1, updated_at = now() WHERE id = $1;
+
+-- name: UpdateCustomerProfile :one
+UPDATE customers
+SET name       = COALESCE(sqlc.narg('name'), name),
+    signature  = COALESCE(sqlc.narg('signature'), signature),
+    email      = COALESCE(sqlc.narg('email'), email),
+    phone      = COALESCE(sqlc.narg('phone'), phone),
+    updated_at = now()
+WHERE id = sqlc.arg('id')
+RETURNING *;
