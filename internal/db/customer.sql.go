@@ -233,7 +233,7 @@ func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
 	return err
 }
 
-const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :execrows
+const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :one
 UPDATE customers
 SET valid_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
@@ -241,15 +241,16 @@ WHERE id = $1 AND deleted_at IS NULL
   AND video_count > 0
   AND invite_count > 0
   AND (phone IS NOT NULL OR email IS NOT NULL)
+RETURNING inviter_id
 `
 
 // 有效用户判定（CAS）：三条件全下沉 SQL 原子完成，valid_at IS NULL 保证只翻转一次、永不回退。
-func (q *Queries) MarkCustomerValidIfQualified(ctx context.Context, id int64) (int64, error) {
-	result, err := q.db.Exec(ctx, markCustomerValidIfQualified, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// 返回 inviter_id 供翻转事务内给邀请人发奖；未翻转返回 ErrNoRows。
+func (q *Queries) MarkCustomerValidIfQualified(ctx context.Context, id int64) (*int64, error) {
+	row := q.db.QueryRow(ctx, markCustomerValidIfQualified, id)
+	var inviter_id *int64
+	err := row.Scan(&inviter_id)
+	return inviter_id, err
 }
 
 const setCustomerLastLogin = `-- name: SetCustomerLastLogin :exec

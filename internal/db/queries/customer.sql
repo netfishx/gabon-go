@@ -26,15 +26,17 @@ WHERE id = $1;
 -- name: IncrementInviteCount :exec
 UPDATE customers SET invite_count = invite_count + 1, updated_at = now() WHERE id = $1;
 
--- name: MarkCustomerValidIfQualified :execrows
+-- name: MarkCustomerValidIfQualified :one
 -- 有效用户判定（CAS）：三条件全下沉 SQL 原子完成，valid_at IS NULL 保证只翻转一次、永不回退。
+-- 返回 inviter_id 供翻转事务内给邀请人发奖；未翻转返回 ErrNoRows。
 UPDATE customers
 SET valid_at = now(), updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL
   AND valid_at IS NULL
   AND video_count > 0
   AND invite_count > 0
-  AND (phone IS NOT NULL OR email IS NOT NULL);
+  AND (phone IS NOT NULL OR email IS NOT NULL)
+RETURNING inviter_id;
 
 -- name: CountValidInvitees :one
 SELECT COUNT(*) FROM customers
