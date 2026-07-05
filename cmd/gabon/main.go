@@ -56,6 +56,10 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := a.Start(ctx); err != nil {
+		return err
+	}
+	defer a.Stop()
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

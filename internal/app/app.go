@@ -18,6 +18,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
 	"github.com/netfishx/gabon-go/internal/storage"
+	"github.com/netfishx/gabon-go/internal/transcode"
 	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
@@ -27,9 +28,21 @@ func Bootstrap(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) erro
 	return admin.NewService(pool).Bootstrap(ctx, cfg.AdminUsername, cfg.AdminPassword)
 }
 
-// App 装配完成的应用：HTTP handler 与后台组件（后续切片加入转码 worker）。
+// App 装配完成的应用：HTTP handler 与后台组件。
 type App struct {
 	Handler http.Handler
+
+	transcoder *transcode.Worker
+}
+
+// Start 启动后台组件（转码 worker 池：恢复超时任务 + 拉起轮询）。
+func (a *App) Start(ctx context.Context) error {
+	return a.transcoder.Start(ctx)
+}
+
+// Stop 停止后台组件并等待在途任务退出。
+func (a *App) Stop() {
+	a.transcoder.Stop()
 }
 
 // New 装配完整应用；main 与 httptest E2E 共用。
@@ -67,7 +80,14 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 
-	return &App{Handler: r}, nil
+	worker := transcode.NewWorker(pool, transcode.Options{
+		Transcode:   transcode.NewFFmpeg(store),
+		Concurrency: cfg.TranscodeWorkers,
+		MaxAttempts: 3,
+		JobTimeout:  cfg.TranscodeTimeout,
+	})
+
+	return &App{Handler: r, transcoder: worker}, nil
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

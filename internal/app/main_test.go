@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -22,6 +23,7 @@ import (
 var (
 	testServer *httptest.Server
 	testPool   *pgxpool.Pool
+	testStore  *storage.Store
 )
 
 const (
@@ -65,6 +67,9 @@ func run(m *testing.M) (int, error) {
 		S3SecretKey:   mio.SecretKey,
 		S3Bucket:      "gabon-test",
 		CDNBaseURL:    "http://" + mio.Endpoint + "/gabon-test",
+
+		TranscodeWorkers: 2,
+		TranscodeTimeout: 60 * time.Second,
 	}
 	store, err := storage.New(storage.Config{
 		Endpoint: cfg.S3Endpoint, AccessKey: cfg.S3AccessKey,
@@ -76,6 +81,7 @@ func run(m *testing.M) (int, error) {
 	if err := store.EnsureBucket(ctx); err != nil {
 		return 0, fmt.Errorf("ensure bucket: %w", err)
 	}
+	testStore = store
 
 	if err := app.Bootstrap(ctx, cfg, testPool); err != nil {
 		return 0, fmt.Errorf("bootstrap: %w", err)
@@ -86,6 +92,10 @@ func run(m *testing.M) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("assemble app: %w", err)
 	}
+	if err := a.Start(ctx); err != nil {
+		return 0, fmt.Errorf("start app: %w", err)
+	}
+	defer a.Stop()
 	testServer = httptest.NewServer(a.Handler)
 	defer testServer.Close()
 

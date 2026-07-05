@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 )
 
 const minJWTSecretLen = 32
@@ -25,6 +27,10 @@ type Config struct {
 	S3UseSSL    bool
 	// CDNBaseURL 播放地址基础域名（如 https://cdn.example.com），回源对象存储
 	CDNBaseURL string
+
+	// 转码 worker 池（ADR-0003）
+	TranscodeWorkers int
+	TranscodeTimeout time.Duration
 }
 
 // Load 从环境变量装载配置，必填项缺失立即报错（fail fast）。
@@ -50,6 +56,22 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.JWTSecret) < minJWTSecretLen {
 		return nil, fmt.Errorf("config: JWT_SECRET must be at least %d bytes", minJWTSecretLen)
+	}
+	cfg.TranscodeWorkers = 2
+	if raw := os.Getenv("TRANSCODE_WORKERS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("config: TRANSCODE_WORKERS must be a positive integer")
+		}
+		cfg.TranscodeWorkers = n
+	}
+	cfg.TranscodeTimeout = 5 * time.Minute
+	if raw := os.Getenv("TRANSCODE_TIMEOUT_SECONDS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("config: TRANSCODE_TIMEOUT_SECONDS must be a positive integer")
+		}
+		cfg.TranscodeTimeout = time.Duration(n) * time.Second
 	}
 	for name, v := range map[string]string{
 		"S3_ENDPOINT":   cfg.S3Endpoint,
