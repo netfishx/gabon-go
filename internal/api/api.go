@@ -31,6 +31,7 @@ func (h *Handler) Routes() chi.Router {
 	r.Get("/feed", h.handleFeed)
 	r.Get("/featured", h.handleFeatured)
 	r.Get("/videos/{publicID}", h.handleVideoDetail)
+	r.Get("/videos/{publicID}/comments", h.handleComments)
 	r.Get("/customers/{publicID}/videos", h.handleCustomerVideos)
 
 	r.Group(func(r chi.Router) {
@@ -44,6 +45,12 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/videos", h.handleVideoConfirm)
 		r.Get("/me/videos", h.handleMyVideos)
 		r.Delete("/videos/{publicID}", h.handleDeleteVideo)
+		r.Post("/videos/{publicID}/like", h.handleLike)
+		r.Delete("/videos/{publicID}/like", h.handleUnlike)
+		r.Post("/videos/{publicID}/comments", h.handleComment)
+		r.Delete("/comments/{commentID}", h.handleDeleteComment)
+		r.Post("/videos/{publicID}/plays", h.handlePlay)
+		r.Post("/plays/{playID}/valid", h.handleValidPlay)
 	})
 	return r
 }
