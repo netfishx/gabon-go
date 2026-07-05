@@ -35,7 +35,7 @@
 |--------|------|------|
 | M1 | 骨架 + 全量迁移 + 双主体认证 + 注册登录 | ✅ [PR #2](https://github.com/netfishx/gabon-go/pull/2) |
 | M2 | 钱包 + 流水（纯账本） | ✅ [PR #9](https://github.com/netfishx/gabon-go/pull/9) |
-| M3 | 视频管线：上传 → 转码 → 审核 → Feed | 待启动 |
+| M3 | 视频管线：上传 → 转码 → 审核 → Feed | ✅ [PR #19](https://github.com/netfishx/gabon-go/pull/19) |
 | M4 | 邀请裂变 + 有效用户判定 | 待启动 |
 | M5 | 奖励族：任务 + 签到 + VIP + 广告 | 待启动 |
 | M6 | 充值提现 + 支付渠道 | 待启动 |
