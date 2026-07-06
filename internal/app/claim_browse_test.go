@@ -94,6 +94,9 @@ func TestClaimTaskDetail(t *testing.T) {
 	if body["requirement"] != "要求" || body["flow"] != "步骤" {
 		t.Errorf("detail missing requirement/flow: %v", body)
 	}
+	if d, _ := body["deadline"].(string); d == "" {
+		t.Errorf("detail missing deadline (US12): %v", body)
+	}
 	if body["claim_status"] != nil {
 		t.Errorf("claim_status = %v, want null (not claimed)", body["claim_status"])
 	}
@@ -216,5 +219,36 @@ func expireClaimsViaService(t *testing.T) {
 	svc := task.NewService(testPool, wallet.NewService(testPool))
 	if _, err := svc.ExpireClaims(context.Background()); err != nil {
 		t.Fatalf("expire claims: %v", err)
+	}
+}
+
+func TestHiddenClaimTaskDetail(t *testing.T) {
+	now := time.Now()
+	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+
+	claimant := uniqueUsername(t)
+	registerCustomer(t, claimant, "")
+	claimantTok := loginCustomer(t, claimant, "secret123")
+	claimTask(t, claimantTok, taskID) // 领取者留下历史
+
+	// 下架该任务
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE claim_tasks SET enabled = false WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("disable task: %v", err)
+	}
+
+	// 从未领取的路人猜 id 查详情 → 404（不泄露已下架定义）
+	stranger := uniqueUsername(t)
+	registerCustomer(t, stranger, "")
+	strangerTok := loginCustomer(t, stranger, "secret123")
+	resp, body := getJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d", taskID), strangerTok)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("stranger on hidden task: status = %d, want 404, body = %v", resp.StatusCode, body)
+	}
+
+	// 领取者仍可看历史详情（200）
+	resp, _ = getJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d", taskID), claimantTok)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("claimant on own hidden task: status = %d, want 200 (history visible)", resp.StatusCode)
 	}
 }

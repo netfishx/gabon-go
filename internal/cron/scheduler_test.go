@@ -50,3 +50,27 @@ func TestRegisterRejectsBadSpec(t *testing.T) {
 		t.Error("expected error for malformed cron spec")
 	}
 }
+
+func TestJobPanicIsRecovered(t *testing.T) {
+	// job panic 必须被隔离：不 crash 进程，调度器与其他 job 不受影响。
+	s := New(quietLogger())
+	var goodRan atomic.Int64
+	if err := s.Register(Job{
+		Name: "panics", Spec: "0 0 * * *",
+		Run: func(context.Context) error { panic("boom") },
+	}); err != nil {
+		t.Fatalf("register panics: %v", err)
+	}
+	if err := s.Register(Job{
+		Name: "good", Spec: "0 0 * * *",
+		Run: func(context.Context) error { goodRan.Add(1); return nil },
+	}); err != nil {
+		t.Fatalf("register good: %v", err)
+	}
+	// 启动即跑一次：panicking job 不得中断，good job 仍执行到
+	s.Start(context.Background())
+	s.Stop()
+	if goodRan.Load() != 1 {
+		t.Errorf("good job runs = %d, want 1 (panic in sibling must not abort startup)", goodRan.Load())
+	}
+}

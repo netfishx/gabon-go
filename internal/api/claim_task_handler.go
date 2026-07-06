@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -91,15 +92,16 @@ func (h *Handler) handleClaimTaskList(w http.ResponseWriter, r *http.Request) {
 }
 
 type claimTaskDetailResponse struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	IconURL     *string `json:"icon_url"`
-	MinVipLevel int32   `json:"min_vip_level"`
-	Reward      int64   `json:"reward"`
-	Requirement *string `json:"requirement"`
-	Flow        *string `json:"flow"`
-	Link        *string `json:"link"`
-	ClaimStatus *string `json:"claim_status"`
+	ID          int64      `json:"id"`
+	Name        string     `json:"name"`
+	IconURL     *string    `json:"icon_url"`
+	MinVipLevel int32      `json:"min_vip_level"`
+	Reward      int64      `json:"reward"`
+	Requirement *string    `json:"requirement"`
+	Flow        *string    `json:"flow"`
+	Link        *string    `json:"link"`
+	Deadline    *time.Time `json:"deadline"` // 截止时间（US12），null = 永不过期
+	ClaimStatus *string    `json:"claim_status"`
 }
 
 func (h *Handler) handleClaimTaskDetail(w http.ResponseWriter, r *http.Request) {
@@ -118,10 +120,15 @@ func (h *Handler) handleClaimTaskDetail(w http.ResponseWriter, r *http.Request) 
 		s := string(d.ClaimStatus.ClaimStatus)
 		status = &s
 	}
+	var deadline *time.Time
+	if d.EndsAt.Valid {
+		deadline = &d.EndsAt.Time
+	}
 	apierr.WriteJSON(w, http.StatusOK, claimTaskDetailResponse{
 		ID: d.ID, Name: d.Name, IconURL: h.mediaURL(d.IconPath),
 		MinVipLevel: d.MinVipLevel, Reward: d.Reward,
-		Requirement: d.Requirement, Flow: d.Flow, Link: d.Link, ClaimStatus: status,
+		Requirement: d.Requirement, Flow: d.Flow, Link: d.Link,
+		Deadline: deadline, ClaimStatus: status,
 	})
 }
 

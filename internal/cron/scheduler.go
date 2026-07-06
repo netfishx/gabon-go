@@ -42,21 +42,28 @@ func (s *Scheduler) Register(j Job) error {
 	return nil
 }
 
-// wrap 统一日志与 panic 隔离：单个 job 失败不影响调度器与其他 job。
+// wrap 统一日志与 panic 隔离：单个 job 失败/panic 不影响调度器与其他 job。
 func (s *Scheduler) wrap(j Job) func() {
-	return func() {
-		if err := j.Run(context.Background()); err != nil {
-			s.logger.Error("cron job failed", "job", j.Name, "error", err)
+	return func() { s.safeRun(context.Background(), j) }
+}
+
+// safeRun 执行 job 并隔离 panic（robfig/cron v3 默认不 recover，任一 job panic 会拖垮进程）。
+func (s *Scheduler) safeRun(ctx context.Context, j Job) {
+	defer func() {
+		if p := recover(); p != nil {
+			s.logger.Error("cron job panicked", "job", j.Name, "panic", p)
 		}
+	}()
+	if err := j.Run(ctx); err != nil {
+		s.logger.Error("cron job failed", "job", j.Name, "error", err)
 	}
 }
 
 // Start 启动调度并对每个 job 立即跑一次（幂等 catch-up：补齐宕机期间缺失的执行）。
+// 启动 run 同样经 safeRun 隔离 panic/错误，一个 job 挂了不阻断其余 job 与调度启动。
 func (s *Scheduler) Start(ctx context.Context) {
 	for _, j := range s.jobs {
-		if err := j.Run(ctx); err != nil {
-			s.logger.Error("cron job startup run failed", "job", j.Name, "error", err)
-		}
+		s.safeRun(ctx, j)
 	}
 	s.c.Start()
 }

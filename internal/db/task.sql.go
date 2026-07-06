@@ -85,6 +85,7 @@ SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
 FROM claim_tasks ct
 LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
 WHERE ct.id = $2
+  AND ((ct.enabled AND ct.deleted_at IS NULL) OR tc.id IS NOT NULL)
 `
 
 type GetClaimTaskForCustomerParams struct {
@@ -107,7 +108,8 @@ type GetClaimTaskForCustomerRow struct {
 	ClaimStatus NullClaimStatus
 }
 
-// 任务详情 + 查看者领取状态（软删任务仍可看历史详情）。
+// 任务详情 + 查看者领取状态。可见性：上架未删的公开可见；已下架/软删的仅本人有领取记录时可看历史，
+// 否则无行（404）——不向路人泄露已撤下的任务定义。
 func (q *Queries) GetClaimTaskForCustomer(ctx context.Context, arg GetClaimTaskForCustomerParams) (GetClaimTaskForCustomerRow, error) {
 	row := q.db.QueryRow(ctx, getClaimTaskForCustomer, arg.CustomerID, arg.ID)
 	var i GetClaimTaskForCustomerRow

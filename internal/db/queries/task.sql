@@ -104,13 +104,15 @@ WHERE ct.enabled AND ct.deleted_at IS NULL
 ORDER BY ct.display_order, ct.id;
 
 -- name: GetClaimTaskForCustomer :one
--- 任务详情 + 查看者领取状态（软删任务仍可看历史详情）。
+-- 任务详情 + 查看者领取状态。可见性：上架未删的公开可见；已下架/软删的仅本人有领取记录时可看历史，
+-- 否则无行（404）——不向路人泄露已撤下的任务定义。
 SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
        ct.requirement, ct.flow, ct.link, ct.starts_at, ct.ends_at, ct.deleted_at,
        tc.status AS claim_status
 FROM claim_tasks ct
 LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
-WHERE ct.id = $2;
+WHERE ct.id = $2
+  AND ((ct.enabled AND ct.deleted_at IS NULL) OR tc.id IS NOT NULL);
 
 -- name: ListMyClaims :many
 -- 我的领取记录：进行中 {claimed,submitted,rejected} / 已完成 {rewarded,expired}（id 降序）。

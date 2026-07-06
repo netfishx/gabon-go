@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,9 +34,7 @@ func groupFor(t db.ListClaimTasksForCustomerRow, vipLevel int32, now time.Time) 
 	if t.ClaimStatus.Valid {
 		return GroupClaimed
 	}
-	inWindow := (!t.StartsAt.Valid || !now.Before(t.StartsAt.Time)) &&
-		(!t.EndsAt.Valid || now.Before(t.EndsAt.Time))
-	if inWindow && vipLevel >= t.MinVipLevel {
+	if withinClaimWindow(t.StartsAt, t.EndsAt, now) && vipLevel >= t.MinVipLevel {
 		return GroupClaimable
 	}
 	return GroupNotClaimable
@@ -49,16 +48,14 @@ func (s *Service) ListClaimTasks(ctx context.Context, customerID int64, vipLevel
 	}
 	now := time.Now().In(tz.Shanghai)
 	order := map[ClaimGroup]int{GroupClaimable: 0, GroupClaimed: 1, GroupNotClaimable: 2}
-	var views []ClaimTaskView
+	views := make([]ClaimTaskView, 0, len(rows))
 	for _, r := range rows {
 		views = append(views, ClaimTaskView{Task: r, Group: groupFor(r, vipLevel, now)})
 	}
-	// 稳定分组：SQL 已按 display_order 排序，此处按组序做稳定二次排序
-	for i := 1; i < len(views); i++ {
-		for j := i; j > 0 && order[views[j].Group] < order[views[j-1].Group]; j-- {
-			views[j], views[j-1] = views[j-1], views[j]
-		}
-	}
+	// 稳定分组：SQL 已按 display_order 排序，此处按组序稳定二次排序保持组内序
+	sort.SliceStable(views, func(i, j int) bool {
+		return order[views[i].Group] < order[views[j].Group]
+	})
 	return views, nil
 }
 
