@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/netfishx/gabon-go/internal/testdb"
+	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
 // 集成测试：短码唯一冲突重试（PRD Testing Decisions 三项之三）。
@@ -19,7 +20,7 @@ func TestRegisterRetriesOnInviteCodeCollision(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 
-	svc := NewService(pool)
+	svc := NewService(pool, wallet.NewService(pool))
 	first, err := svc.Register(ctx, "collide_a", "secret123", "")
 	if err != nil {
 		t.Fatalf("register first: %v", err)

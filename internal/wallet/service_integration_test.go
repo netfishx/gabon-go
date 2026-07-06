@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/db"
 	"github.com/netfishx/gabon-go/internal/testdb"
 )
@@ -37,14 +36,25 @@ func TestMain(m *testing.M) {
 
 var nameSeq atomic.Int64
 
+// setup 直插客户与零余额钱包 fixture。
+// 不走 customer 域注册：customer 依赖 wallet 发奖，反向引用会在测试编译时成环。
 func setup(t *testing.T) (*Service, int64) {
 	t.Helper()
-	username := fmt.Sprintf("w%d_%d", os.Getpid()%10000, nameSeq.Add(1))
-	c, err := customer.NewService(testPool).Register(context.Background(), username, "secret123", "")
-	if err != nil {
-		t.Fatalf("register fixture customer: %v", err)
+	n := nameSeq.Add(1)
+	username := fmt.Sprintf("w%d_%d", os.Getpid()%10000, n)
+	var id int64
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO customers (public_id, username, password_hash, invite_code)
+		 VALUES ($1, $2, 'not-a-real-hash', $3) RETURNING id`,
+		fmt.Sprintf("wfix%08d", n), username, fmt.Sprintf("WF%06d", n),
+	).Scan(&id); err != nil {
+		t.Fatalf("stage fixture customer: %v", err)
 	}
-	return NewService(testPool), c.ID
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO wallets (customer_id) VALUES ($1)`, id); err != nil {
+		t.Fatalf("stage fixture wallet: %v", err)
+	}
+	return NewService(testPool), id
 }
 
 func balances(t *testing.T, customerID int64) (available, frozen int64) {

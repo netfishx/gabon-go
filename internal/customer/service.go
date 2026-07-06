@@ -13,6 +13,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
 // maxCodeRetries 短码碰撞重试上限；命中即视为随机源异常。
@@ -20,8 +21,9 @@ const maxCodeRetries = 5
 
 // Service 客户域服务，直连 sqlc 生成的查询。
 type Service struct {
-	pool *pgxpool.Pool
-	q    *db.Queries
+	pool    *pgxpool.Pool
+	q       *db.Queries
+	wallets *wallet.Service // 邀请有效奖励入账走钱包域原语（依赖方向：功能域 → wallet）
 
 	// 短码生成器：可注入以便测试强制碰撞，默认 crypto/rand 实现
 	genPublicID   func() (string, error)
@@ -29,10 +31,11 @@ type Service struct {
 }
 
 // NewService 构造客户域服务。
-func NewService(pool *pgxpool.Pool) *Service {
+func NewService(pool *pgxpool.Pool, wallets *wallet.Service) *Service {
 	return &Service{
 		pool:          pool,
 		q:             db.New(pool),
+		wallets:       wallets,
 		genPublicID:   newPublicID,
 		genInviteCode: newInviteCode,
 	}
@@ -89,6 +92,10 @@ func (s *Service) Register(ctx context.Context, username, password, inviteCode s
 			}
 			if inviterID != nil {
 				if err := q.IncrementInviteCount(ctx, *inviterID); err != nil {
+					return err
+				}
+				// 邀请人总邀请数刚 +1，可能因此凑齐有效用户条件
+				if _, err := s.MarkValidIfQualifiedTx(ctx, tx, *inviterID); err != nil {
 					return err
 				}
 			}

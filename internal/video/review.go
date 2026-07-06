@@ -35,8 +35,8 @@ func (s *Service) ListPendingReview(ctx context.Context, cursor int64, limit int
 	return items, next, nil
 }
 
-// Approve 审核通过：视频翻 published 与作者 video_count+1 同一事务。
-// video_count 是有效用户判定"有作品"的输入（判定钩子 M4 接入）。
+// Approve 审核通过：视频翻 published、作者 video_count+1 与 OnApproved 钩子同一事务。
+// video_count 是有效用户判定"有作品"的输入。
 func (s *Service) Approve(ctx context.Context, adminID int64, publicID string) error {
 	v, err := s.getByPublicID(ctx, publicID)
 	if err != nil {
@@ -51,7 +51,13 @@ func (s *Service) Approve(ctx context.Context, adminID int64, publicID string) e
 		if rows == 0 {
 			return notReviewable()
 		}
-		return q.IncrementVideoCount(ctx, v.CustomerID)
+		if err := q.IncrementVideoCount(ctx, v.CustomerID); err != nil {
+			return err
+		}
+		if s.OnApproved != nil {
+			return s.OnApproved(ctx, tx, v.CustomerID)
+		}
+		return nil
 	})
 }
 

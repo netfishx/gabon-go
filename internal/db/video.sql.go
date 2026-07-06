@@ -102,6 +102,18 @@ func (q *Queries) CreateVideo(ctx context.Context, arg CreateVideoParams) (Video
 	return i, err
 }
 
+const decrementVideoCount = `-- name: DecrementVideoCount :exec
+UPDATE customers SET video_count = video_count - 1, updated_at = now()
+WHERE id = $1 AND video_count > 0
+`
+
+// video_count 语义 = 已发布且未删除的作品数（有效用户判定"有作品"的输入），
+// 删除已发布视频时对称回退；video_count > 0 护栏防数据异常下的负值。
+func (q *Queries) DecrementVideoCount(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, decrementVideoCount, id)
+	return err
+}
+
 const getPublishedVideoByPublicID = `-- name: GetPublishedVideoByPublicID :one
 SELECT v.id, v.public_id, v.customer_id, v.title, v.tags, v.storage_path, v.hls_path, v.thumbnail_path, v.duration, v.width, v.height, v.file_size, v.mime_type, v.status, v.reviewed_by, v.reviewed_at, v.review_notes, v.click_count, v.valid_play_count, v.like_count, v.comment_count, v.hot_score, v.deleted_at, v.created_at, v.updated_at, c.public_id AS author_public_id, c.username AS author_username
 FROM videos v
@@ -551,9 +563,10 @@ func (q *Queries) RejectVideo(ctx context.Context, arg RejectVideoParams) (int64
 	return result.RowsAffected(), nil
 }
 
-const softDeleteVideo = `-- name: SoftDeleteVideo :execrows
+const softDeleteVideo = `-- name: SoftDeleteVideo :one
 UPDATE videos SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+RETURNING status
 `
 
 type SoftDeleteVideoParams struct {
@@ -561,10 +574,11 @@ type SoftDeleteVideoParams struct {
 	CustomerID int64
 }
 
-func (q *Queries) SoftDeleteVideo(ctx context.Context, arg SoftDeleteVideoParams) (int64, error) {
-	result, err := q.db.Exec(ctx, softDeleteVideo, arg.ID, arg.CustomerID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// RETURNING status：原子拿到删除时状态，published 才回退作者 video_count
+// （避免"先读后删"窗口里并发过审导致计数漏减）。
+func (q *Queries) SoftDeleteVideo(ctx context.Context, arg SoftDeleteVideoParams) (VideoStatus, error) {
+	row := q.db.QueryRow(ctx, softDeleteVideo, arg.ID, arg.CustomerID)
+	var status VideoStatus
+	err := row.Scan(&status)
+	return status, err
 }

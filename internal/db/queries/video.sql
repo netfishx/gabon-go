@@ -74,6 +74,15 @@ WHERE customer_id = $1 AND deleted_at IS NULL
 ORDER BY id DESC
 LIMIT sqlc.arg(row_limit);
 
--- name: SoftDeleteVideo :execrows
+-- name: SoftDeleteVideo :one
+-- RETURNING status：原子拿到删除时状态，published 才回退作者 video_count
+--（避免"先读后删"窗口里并发过审导致计数漏减）。
 UPDATE videos SET deleted_at = now(), updated_at = now()
-WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL;
+WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+RETURNING status;
+
+-- name: DecrementVideoCount :exec
+-- video_count 语义 = 已发布且未删除的作品数（有效用户判定"有作品"的输入），
+-- 删除已发布视频时对称回退；video_count > 0 护栏防数据异常下的负值。
+UPDATE customers SET video_count = video_count - 1, updated_at = now()
+WHERE id = $1 AND video_count > 0;

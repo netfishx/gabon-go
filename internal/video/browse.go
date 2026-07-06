@@ -91,17 +91,25 @@ func (s *Service) Mine(ctx context.Context, customerID, cursor int64, limit int3
 }
 
 // Delete 软删本人视频；他人视频与已删视频一律 404（不泄露存在性）。
+// 删除已发布视频时同事务回退作者 video_count（"有作品"判定的输入），
+// 防止删光作品后仍被翻转为有效用户（旧版不减计数的洞，有意不复刻）。
 func (s *Service) Delete(ctx context.Context, customerID int64, publicID string) error {
 	v, err := s.getByPublicID(ctx, publicID)
 	if err != nil {
 		return err
 	}
-	rows, err := s.q.SoftDeleteVideo(ctx, db.SoftDeleteVideoParams{ID: v.ID, CustomerID: customerID})
-	if err != nil {
-		return fmt.Errorf("soft delete video: %w", err)
-	}
-	if rows == 0 {
-		return notFound()
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		status, err := q.SoftDeleteVideo(ctx, db.SoftDeleteVideoParams{ID: v.ID, CustomerID: customerID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return notFound()
+		}
+		if err != nil {
+			return fmt.Errorf("soft delete video: %w", err)
+		}
+		if status == db.VideoStatusPublished {
+			return q.DecrementVideoCount(ctx, customerID)
+		}
+		return nil
+	})
 }

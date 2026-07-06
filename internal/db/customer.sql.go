@@ -9,6 +9,18 @@ import (
 	"context"
 )
 
+const countValidInvitees = `-- name: CountValidInvitees :one
+SELECT COUNT(*) FROM customers
+WHERE inviter_id = $1 AND valid_at IS NOT NULL AND deleted_at IS NULL
+`
+
+func (q *Queries) CountValidInvitees(ctx context.Context, inviterID *int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countValidInvitees, inviterID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createCustomer = `-- name: CreateCustomer :one
 INSERT INTO customers (public_id, username, password_hash, invite_code, inviter_id, ancestors)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -221,6 +233,109 @@ func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
 	return err
 }
 
+const listTeamMembers = `-- name: ListTeamMembers :many
+SELECT c.id, c.public_id, c.username, c.name, c.avatar_path,
+       (c.valid_at IS NOT NULL)::bool AS valid,
+       (CASE WHEN $1::bool THEN
+            (SELECT COUNT(*) FROM customers s
+             WHERE s.inviter_id = c.id AND s.deleted_at IS NULL)
+        ELSE 0 END)::bigint AS subordinate_count
+FROM customers c
+WHERE c.inviter_id = $2
+  AND c.deleted_at IS NULL
+  AND c.id > $3
+ORDER BY c.id
+LIMIT $4
+`
+
+type ListTeamMembersParams struct {
+	CountSubordinates bool
+	ParentID          *int64
+	Cursor            int64
+	RowLimit          int32
+}
+
+type ListTeamMembersRow struct {
+	ID               int64
+	PublicID         string
+	Username         string
+	Name             *string
+	AvatarPath       *string
+	Valid            bool
+	SubordinateCount int64
+}
+
+// 团队下钻单位：某成员的直接下级，附带各自的直接下级数（id 升序游标分页）。
+// count_subordinates=false 时计数归 0：深度 3 成员的下级在团队之外，不泄漏界外结构。
+func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error) {
+	rows, err := q.db.Query(ctx, listTeamMembers,
+		arg.CountSubordinates,
+		arg.ParentID,
+		arg.Cursor,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTeamMembersRow
+	for rows.Next() {
+		var i ListTeamMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PublicID,
+			&i.Username,
+			&i.Name,
+			&i.AvatarPath,
+			&i.Valid,
+			&i.SubordinateCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockInviterForGrant = `-- name: LockInviterForGrant :one
+SELECT vip_level FROM customers
+WHERE id = $1 AND deleted_at IS NULL
+FOR NO KEY UPDATE
+`
+
+// 发奖前锁邀请人行，串行化同一邀请人的并发 cap 检查——
+// 后到事务重数有效邀请数时必能看见先提交的翻转，杜绝并发超发。
+// FOR NO KEY UPDATE：互相排斥即可，不与注册插入 FK 引用取的 KEY SHARE 冲突。
+func (q *Queries) LockInviterForGrant(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, lockInviterForGrant, id)
+	var vip_level int32
+	err := row.Scan(&vip_level)
+	return vip_level, err
+}
+
+const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :one
+UPDATE customers
+SET valid_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+  AND valid_at IS NULL
+  AND video_count > 0
+  AND invite_count > 0
+  AND (phone IS NOT NULL OR email IS NOT NULL)
+RETURNING inviter_id
+`
+
+// 有效用户判定（CAS）：三条件全下沉 SQL 原子完成，valid_at IS NULL 保证只翻转一次、永不回退。
+// 返回 inviter_id 供翻转事务内给邀请人发奖；未翻转返回 ErrNoRows。
+func (q *Queries) MarkCustomerValidIfQualified(ctx context.Context, id int64) (*int64, error) {
+	row := q.db.QueryRow(ctx, markCustomerValidIfQualified, id)
+	var inviter_id *int64
+	err := row.Scan(&inviter_id)
+	return inviter_id, err
+}
+
 const setCustomerLastLogin = `-- name: SetCustomerLastLogin :exec
 UPDATE customers SET last_login_at = now(), updated_at = now() WHERE id = $1
 `
@@ -228,6 +343,59 @@ UPDATE customers SET last_login_at = now(), updated_at = now() WHERE id = $1
 func (q *Queries) SetCustomerLastLogin(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, setCustomerLastLogin, id)
 	return err
+}
+
+const sumInviteRewards = `-- name: SumInviteRewards :one
+SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions
+WHERE customer_id = $1 AND type = 'invite_valid_reward'
+`
+
+// 查看者累计邀请奖励（流水现算；SUM 空集为 NULL，COALESCE 归 0 是 SQL 语义而非业务兜底）。
+func (q *Queries) SumInviteRewards(ctx context.Context, customerID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, sumInviteRewards, customerID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const teamSummaryByDepth = `-- name: TeamSummaryByDepth :many
+SELECT (cardinality(c.ancestors) - array_position(c.ancestors, $1::bigint) + 1)::int AS depth,
+       COUNT(*)::bigint AS member_count,
+       (COUNT(*) FILTER (WHERE c.valid_at IS NOT NULL))::bigint AS valid_count
+FROM customers c
+WHERE c.ancestors && ARRAY[$1::bigint]
+  AND c.deleted_at IS NULL
+  AND cardinality(c.ancestors) - array_position(c.ancestors, $1::bigint) + 1 <= 3
+GROUP BY 1
+ORDER BY 1
+`
+
+type TeamSummaryByDepthRow struct {
+	Depth       int32
+	MemberCount int64
+	ValidCount  int64
+}
+
+// 团队（3 级以内）按深度聚合人数与有效人数：物化祖先路径 && 走 GIN，
+// 深度 = 路径长度 - viewer 在路径中的位置 + 1。
+func (q *Queries) TeamSummaryByDepth(ctx context.Context, viewerID int64) ([]TeamSummaryByDepthRow, error) {
+	rows, err := q.db.Query(ctx, teamSummaryByDepth, viewerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TeamSummaryByDepthRow
+	for rows.Next() {
+		var i TeamSummaryByDepthRow
+		if err := rows.Scan(&i.Depth, &i.MemberCount, &i.ValidCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateCustomerPassword = `-- name: UpdateCustomerPassword :exec
@@ -244,4 +412,62 @@ type UpdateCustomerPasswordParams struct {
 func (q *Queries) UpdateCustomerPassword(ctx context.Context, arg UpdateCustomerPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateCustomerPassword, arg.ID, arg.PasswordHash)
 	return err
+}
+
+const updateCustomerProfile = `-- name: UpdateCustomerProfile :one
+UPDATE customers
+SET name       = COALESCE($1, name),
+    signature  = COALESCE($2, signature),
+    email      = COALESCE($3, email),
+    phone      = COALESCE($4, phone),
+    updated_at = now()
+WHERE id = $5
+RETURNING id, public_id, username, password_hash, password_changed_at, name, phone, email, avatar_path, signature, invite_code, inviter_id, ancestors, valid_at, vip_level, status, withdrawal_password_hash, video_count, invite_count, follower_count, following_count, last_login_at, deleted_at, created_at, updated_at
+`
+
+type UpdateCustomerProfileParams struct {
+	Name      *string
+	Signature *string
+	Email     *string
+	Phone     *string
+	ID        int64
+}
+
+func (q *Queries) UpdateCustomerProfile(ctx context.Context, arg UpdateCustomerProfileParams) (Customer, error) {
+	row := q.db.QueryRow(ctx, updateCustomerProfile,
+		arg.Name,
+		arg.Signature,
+		arg.Email,
+		arg.Phone,
+		arg.ID,
+	)
+	var i Customer
+	err := row.Scan(
+		&i.ID,
+		&i.PublicID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.PasswordChangedAt,
+		&i.Name,
+		&i.Phone,
+		&i.Email,
+		&i.AvatarPath,
+		&i.Signature,
+		&i.InviteCode,
+		&i.InviterID,
+		&i.Ancestors,
+		&i.ValidAt,
+		&i.VipLevel,
+		&i.Status,
+		&i.WithdrawalPasswordHash,
+		&i.VideoCount,
+		&i.InviteCount,
+		&i.FollowerCount,
+		&i.FollowingCount,
+		&i.LastLoginAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

@@ -24,18 +24,30 @@ type registerRequest struct {
 }
 
 type customerResponse struct {
-	PublicID   string    `json:"public_id"`
-	Username   string    `json:"username"`
-	InviteCode string    `json:"invite_code"`
-	CreatedAt  time.Time `json:"created_at"`
+	PublicID    string    `json:"public_id"`
+	Username    string    `json:"username"`
+	Name        *string   `json:"name"`
+	Signature   *string   `json:"signature"`
+	Email       *string   `json:"email"`
+	Phone       *string   `json:"phone"`
+	InviteCode  string    `json:"invite_code"`
+	Valid       bool      `json:"valid"`
+	InviteCount int32     `json:"invite_count"` // 总邀请数（注册即算），区别于 /me 的 valid_invite_count
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 func toCustomerResponse(c *db.Customer) customerResponse {
 	return customerResponse{
-		PublicID:   c.PublicID,
-		Username:   c.Username,
-		InviteCode: c.InviteCode,
-		CreatedAt:  c.CreatedAt.Time,
+		PublicID:    c.PublicID,
+		Username:    c.Username,
+		Name:        c.Name,
+		Signature:   c.Signature,
+		Email:       c.Email,
+		Phone:       c.Phone,
+		InviteCode:  c.InviteCode,
+		Valid:       c.ValidAt.Valid,
+		InviteCount: c.InviteCount,
+		CreatedAt:   c.CreatedAt.Time,
 	}
 }
 
@@ -89,8 +101,23 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	apierr.WriteJSON(w, http.StatusOK, loginResponse{Token: token, Customer: toCustomerResponse(c)})
 }
 
+// meResponse /me 在通用客户信息外附带有效邀请数（现算计数，仅本端点提供）。
+type meResponse struct {
+	customerResponse
+	ValidInviteCount int64 `json:"valid_invite_count"`
+}
+
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
-	apierr.WriteJSON(w, http.StatusOK, toCustomerResponse(customerFrom(r.Context())))
+	c := customerFrom(r.Context())
+	validInvites, err := h.Customers.CountValidInvitees(r.Context(), c.ID)
+	if err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	apierr.WriteJSON(w, http.StatusOK, meResponse{
+		customerResponse: toCustomerResponse(c),
+		ValidInviteCount: validInvites,
+	})
 }
 
 type changePasswordRequest struct {

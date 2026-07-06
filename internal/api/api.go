@@ -37,10 +37,13 @@ func (h *Handler) Routes() chi.Router {
 	r.Group(func(r chi.Router) {
 		r.Use(h.requireCustomer, h.recordActive)
 		r.Get("/me", h.handleMe)
+		r.Patch("/me/profile", h.handleUpdateProfile)
 		r.Post("/me/password", h.handleChangePassword)
 		r.Post("/auth/refresh", h.handleRefresh)
 		r.Get("/wallet", h.handleWallet)
 		r.Get("/wallet/transactions", h.handleWalletTransactions)
+		r.Get("/team/members", h.handleTeamMembers)
+		r.Get("/team/summary", h.handleTeamSummary)
 		r.Post("/videos/uploads", h.handleVideoUpload)
 		r.Post("/videos", h.handleVideoConfirm)
 		r.Get("/me/videos", h.handleMyVideos)
