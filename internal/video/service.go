@@ -82,6 +82,15 @@ func (s *Service) Confirm(ctx context.Context, customerID int64, storagePath, ti
 		return nil, apierr.New(http.StatusBadRequest, apierr.CodeVideoObjectMissing, "uploaded object not found")
 	}
 
+	// VIP 档发布作品上限（M5 #38 复刻）：limit>0 且现存已发布作品数达上限则拒；≤0 不限。
+	lim, err := s.q.GetUploadLimitForCustomer(ctx, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("get upload limit: %w", err)
+	}
+	if lim.UploadVideoLimit > 0 && lim.VideoCount >= lim.UploadVideoLimit {
+		return nil, apierr.New(http.StatusConflict, apierr.CodeVideoUploadLimit, "video upload limit reached for your vip level")
+	}
+
 	publicID, err := shortcode.New(shortcode.Base58, 12)
 	if err != nil {
 		return nil, err

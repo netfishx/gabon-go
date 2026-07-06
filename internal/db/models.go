@@ -990,6 +990,7 @@ type VipLevelConfig struct {
 	RewardMultiplierBp int32
 	InviteRewardCap    int64
 	UpdatedAt          pgtype.Timestamptz
+	UploadVideoLimit   int32
 }
 
 type VipPurchase struct {
