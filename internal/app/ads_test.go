@@ -8,11 +8,38 @@ import (
 	"time"
 )
 
-var adSeq atomicSeq
+var adSeq serialSeq
 
-type atomicSeq struct{ n int64 }
+// serialSeq 串行测试内的单调计数器（stage helper 串行调用，无并发）。
+type serialSeq struct{ n int64 }
 
-func (a *atomicSeq) next() int64 { a.n++; return a.n }
+func (a *serialSeq) next() int64 { a.n++; return a.n }
+
+// isolateServingAds 下架当前全部在投广告，返回精确恢复函数（只复活本次下架的那些，
+// 不误动其他测试故意置 offline 的广告）。
+func isolateServingAds(t *testing.T) func() {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := testPool.Query(ctx, `SELECT id FROM ads WHERE status = 'active' AND deleted_at IS NULL`)
+	if err != nil {
+		t.Fatalf("query serving ads: %v", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if _, err := testPool.Exec(ctx, `UPDATE ads SET status = 'offline' WHERE id = ANY($1)`, ids); err != nil {
+		t.Fatalf("offline serving ads: %v", err)
+	}
+	return func() {
+		testPool.Exec(ctx, `UPDATE ads SET status = 'active' WHERE id = ANY($1)`, ids)
+	}
+}
 
 // stageAdvertiser 直插一个广告商，返回 id。
 func stageAdvertiser(t *testing.T, status string) int64 {
@@ -112,12 +139,8 @@ func TestWatchAdNoServingAd(t *testing.T) {
 	registerCustomer(t, username, "")
 	token := loginCustomer(t, username, "secret123")
 
-	// 无任何在投广告时（本测试自身不建广告；但其他测试可能留有——用一个全新客户 + 保证无在投）
-	// 为确定性：先把所有广告下架
-	testPool.Exec(context.Background(), `UPDATE ads SET status = 'offline'`)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `UPDATE ads SET status = 'active' WHERE stock_remaining > 0`)
-	})
+	// 确定性无在投：下架当前全部在投广告，测试后精确复活
+	t.Cleanup(isolateServingAds(t))
 
 	resp, body := watchAd(t, token)
 	if resp.StatusCode != http.StatusOK {
@@ -133,11 +156,8 @@ func TestWatchAdServingConditions(t *testing.T) {
 	username := uniqueUsername(t)
 	registerCustomer(t, username, "")
 	token := loginCustomer(t, username, "secret123")
-	// 隔离环境：先下架全部既有广告
-	testPool.Exec(context.Background(), `UPDATE ads SET status = 'offline'`)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `UPDATE ads SET status = 'active' WHERE stock_remaining > 0`)
-	})
+	// 隔离环境：下架当前全部在投广告，测试后精确复活
+	t.Cleanup(isolateServingAds(t))
 
 	activeAdv := stageAdvertiser(t, "active")
 	offlineAdv := stageAdvertiser(t, "offline")
@@ -202,6 +222,38 @@ func TestAdvertiserAndAdCRUD(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete ad: status = %d", resp.StatusCode)
 	}
+
+	// 新建默认下架（须手动上架才投放）
+	_, list = getJSON(t, "/admin/v1/advertisers", adminToken)
+	items, _ := list["items"].([]any)
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		if int64(m["id"].(float64)) == advID {
+			if m["status"] != "offline" {
+				t.Errorf("new advertiser status = %v, want offline (manual publish gate)", m["status"])
+			}
+		}
+	}
+
+	// 删广告商（软删）：从列表消失
+	resp, _ = doJSON(t, http.MethodDelete, fmt.Sprintf("/admin/v1/advertisers/%d", advID), adminToken, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete advertiser: status = %d", resp.StatusCode)
+	}
+	_, list = getJSON(t, "/admin/v1/advertisers", adminToken)
+	if adminListContainsID(list, advID) {
+		t.Errorf("deleted advertiser still in list")
+	}
+}
+
+func TestCreateAdUnknownAdvertiser(t *testing.T) {
+	adminToken := loginAdmin(t)
+	resp, body := postJSON(t, "/admin/v1/ads", map[string]any{
+		"advertiser_id": int64(999999999), "title": "孤儿广告", "media_path": "ads/x.mp4", "stock": 1,
+	}, adminToken)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("create ad with unknown advertiser: status = %d, want 400, body = %v", resp.StatusCode, body)
+	}
 }
 
 func TestAdvertiserOfflineCascadesAds(t *testing.T) {
@@ -237,6 +289,7 @@ func TestAdAdminRequiresAdminRole(t *testing.T) {
 		{http.MethodGet, "/admin/v1/ads", nil},
 		{http.MethodPost, "/admin/v1/ads", map[string]any{"advertiser_id": advID, "title": "x", "media_path": "y", "stock": 1}},
 		{http.MethodPatch, fmt.Sprintf("/admin/v1/advertisers/%d/status", advID), map[string]any{"enabled": false}},
+		{http.MethodDelete, fmt.Sprintf("/admin/v1/advertisers/%d", advID), nil},
 	}
 	for _, e := range endpoints {
 		t.Run(e.method+e.path, func(t *testing.T) {

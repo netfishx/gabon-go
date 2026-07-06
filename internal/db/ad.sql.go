@@ -23,9 +23,9 @@ func (q *Queries) CascadeOfflineAds(ctx context.Context, advertiserID int64) err
 }
 
 const createAd = `-- name: CreateAd :one
-INSERT INTO ads (advertiser_id, title, media_path, link, stock_total, stock_remaining, expires_at)
+INSERT INTO ads (advertiser_id, title, media_path, link, stock_total, stock_remaining, expires_at, status)
 VALUES ($1, $2, $3, $4,
-        $5, $5, $6)
+        $5, $5, $6, 'offline')
 RETURNING id, advertiser_id, title, media_path, link, stock_total, stock_remaining, status, deleted_at, created_at, updated_at, expires_at
 `
 
@@ -38,6 +38,7 @@ type CreateAdParams struct {
 	ExpiresAt    pgtype.Timestamptz
 }
 
+// 新建默认下架（offline）：须运营手动上架才投放（复刻旧版安全闸）。
 func (q *Queries) CreateAd(ctx context.Context, arg CreateAdParams) (Ad, error) {
 	row := q.db.QueryRow(ctx, createAd,
 		arg.AdvertiserID,
@@ -66,7 +67,7 @@ func (q *Queries) CreateAd(ctx context.Context, arg CreateAdParams) (Ad, error) 
 }
 
 const createAdvertiser = `-- name: CreateAdvertiser :one
-INSERT INTO advertisers (name, contact) VALUES ($1, $2) RETURNING id, name, contact, status, deleted_at, created_at, updated_at
+INSERT INTO advertisers (name, contact, status) VALUES ($1, $2, 'offline') RETURNING id, name, contact, status, deleted_at, created_at, updated_at
 `
 
 type CreateAdvertiserParams struct {
@@ -74,6 +75,7 @@ type CreateAdvertiserParams struct {
 	Contact *string
 }
 
+// 新建默认下架（offline）：须运营手动上架才投放（复刻旧版安全闸）。
 func (q *Queries) CreateAdvertiser(ctx context.Context, arg CreateAdvertiserParams) (Advertiser, error) {
 	row := q.db.QueryRow(ctx, createAdvertiser, arg.Name, arg.Contact)
 	var i Advertiser
@@ -259,6 +261,19 @@ WHERE id = $1 AND deleted_at IS NULL
 
 func (q *Queries) SoftDeleteAd(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, softDeleteAd, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteAdvertiser = `-- name: SoftDeleteAdvertiser :execrows
+UPDATE advertisers SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteAdvertiser(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteAdvertiser, id)
 	if err != nil {
 		return 0, err
 	}

@@ -57,6 +57,7 @@ func (h *Handler) Routes() chi.Router {
 			r.Post("/advertisers", h.handleCreateAdvertiser)
 			r.Patch("/advertisers/{id}", h.handleUpdateAdvertiser)
 			r.Patch("/advertisers/{id}/status", h.handleSetAdvertiserStatus)
+			r.Delete("/advertisers/{id}", h.handleDeleteAdvertiser)
 			r.Get("/ads", h.handleListAds)
 			r.Post("/ads", h.handleCreateAd)
 			r.Patch("/ads/{id}", h.handleUpdateAd)
@@ -65,6 +66,27 @@ func (h *Handler) Routes() chi.Router {
 		})
 	})
 	return r
+}
+
+// toggleStatus 上下架/启停端点共用骨架：解析 id + enabled（缺失 400，防误下架）→ 调 apply。
+func (h *Handler) toggleStatus(w http.ResponseWriter, r *http.Request, apply func(ctx context.Context, id int64, enabled bool) error) {
+	id, ok := idParam(w, r)
+	if !ok {
+		return
+	}
+	var req toggleStatusRequest
+	if !apierr.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.Enabled == nil {
+		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
+		return
+	}
+	if err := apply(r.Context(), id, *req.Enabled); err != nil {
+		apierr.Write(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // requireRole 角色门禁：置于 requireAdmin 之后，主体已注入 context。

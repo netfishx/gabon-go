@@ -267,24 +267,7 @@ type toggleStatusRequest struct {
 }
 
 func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Request) {
-	id, ok := idParam(w, r)
-	if !ok {
-		return
-	}
-	var req toggleStatusRequest
-	if !apierr.DecodeJSON(w, r, &req) {
-		return
-	}
-	// 破坏性 toggle：enabled 缺失（{} 或拼错字段）不得静默下架
-	if req.Enabled == nil {
-		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
-		return
-	}
-	if err := h.Tasks.SetClaimTaskEnabled(r.Context(), id, *req.Enabled); err != nil {
-		apierr.Write(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	h.toggleStatus(w, r, h.Tasks.SetClaimTaskEnabled)
 }
 
 func (h *Handler) handleDeleteClaimTask(w http.ResponseWriter, r *http.Request) {

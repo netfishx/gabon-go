@@ -34,7 +34,8 @@ func TestConcurrentWatchStockNotOversold(t *testing.T) {
 	// 造 8 个看客
 	customerIDs := make([]int64, 8)
 	for i := range customerIDs {
-		if err := pool.QueryRow(ctx,
+		if err := pool.QueryRow(
+			ctx,
 			`INSERT INTO customers (public_id, username, password_hash, invite_code)
 			 VALUES ($1, $2, 'x', $3) RETURNING id`,
 			fmt.Sprintf("adfix%06d", i), fmt.Sprintf("ad_watcher_%d", i), fmt.Sprintf("AD%06d", i),

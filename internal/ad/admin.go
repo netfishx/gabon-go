@@ -48,6 +48,21 @@ func (s *Service) UpdateAdvertiser(ctx context.Context, p db.UpdateAdvertiserPar
 	return a, nil
 }
 
+// SoftDeleteAdvertiser 软删广告商并同事务下架名下广告（服务 JOIN 已按 deleted_at 过滤，级联保列表一致）。
+func (s *Service) SoftDeleteAdvertiser(ctx context.Context, advertiserID int64) error {
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		rows, err := q.SoftDeleteAdvertiser(ctx, advertiserID)
+		if err != nil {
+			return fmt.Errorf("soft delete advertiser: %w", err)
+		}
+		if rows == 0 {
+			return adNotFound()
+		}
+		return q.CascadeOfflineAds(ctx, advertiserID)
+	})
+}
+
 // SetAdvertiserStatus 上下架广告商；下架时同事务单向写级联下架名下广告（重开不反向恢复）。
 func (s *Service) SetAdvertiserStatus(ctx context.Context, advertiserID int64, active bool) error {
 	status := db.AdStatusActive
@@ -72,9 +87,12 @@ func (s *Service) SetAdvertiserStatus(ctx context.Context, advertiserID int64, a
 
 // ---- 广告 ----
 
-// CreateAd 新增广告。
+// CreateAd 新增广告；广告商不存在（FK 违例）映射为参数错误而非 500。
 func (s *Service) CreateAd(ctx context.Context, p db.CreateAdParams) (db.Ad, error) {
 	a, err := s.q.CreateAd(ctx, p)
+	if db.IsForeignKeyViolation(err) {
+		return db.Ad{}, apierr.InvalidArgument("advertiser does not exist")
+	}
 	if err != nil {
 		return db.Ad{}, fmt.Errorf("create ad: %w", err)
 	}

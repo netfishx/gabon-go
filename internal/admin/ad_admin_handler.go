@@ -73,23 +73,19 @@ func (h *Handler) handleUpdateAdvertiser(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) handleSetAdvertiserStatus(w http.ResponseWriter, r *http.Request) {
+	h.toggleStatus(w, r, h.Ads.SetAdvertiserStatus)
+}
+
+func (h *Handler) handleDeleteAdvertiser(w http.ResponseWriter, r *http.Request) {
 	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
-	var req toggleStatusRequest
-	if !apierr.DecodeJSON(w, r, &req) {
-		return
-	}
-	if req.Enabled == nil {
-		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
-		return
-	}
-	if err := h.Ads.SetAdvertiserStatus(r.Context(), id, *req.Enabled); err != nil {
+	if err := h.Ads.SoftDeleteAdvertiser(r.Context(), id); err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- 广告 ----
@@ -183,23 +179,7 @@ func (h *Handler) handleUpdateAd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleSetAdStatus(w http.ResponseWriter, r *http.Request) {
-	id, ok := idParam(w, r)
-	if !ok {
-		return
-	}
-	var req toggleStatusRequest
-	if !apierr.DecodeJSON(w, r, &req) {
-		return
-	}
-	if req.Enabled == nil {
-		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
-		return
-	}
-	if err := h.Ads.SetAdStatus(r.Context(), id, *req.Enabled); err != nil {
-		apierr.Write(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	h.toggleStatus(w, r, h.Ads.SetAdStatus)
 }
 
 func (h *Handler) handleDeleteAd(w http.ResponseWriter, r *http.Request) {

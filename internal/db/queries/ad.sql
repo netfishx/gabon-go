@@ -17,7 +17,12 @@ WHERE id = $1 AND stock_remaining > 0;
 INSERT INTO ad_watches (customer_id, ad_id) VALUES ($1, $2);
 
 -- name: CreateAdvertiser :one
-INSERT INTO advertisers (name, contact) VALUES ($1, sqlc.narg('contact')) RETURNING *;
+-- 新建默认下架（offline）：须运营手动上架才投放（复刻旧版安全闸）。
+INSERT INTO advertisers (name, contact, status) VALUES ($1, sqlc.narg('contact'), 'offline') RETURNING *;
+
+-- name: SoftDeleteAdvertiser :execrows
+UPDATE advertisers SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: ListAdvertisers :many
 SELECT * FROM advertisers WHERE deleted_at IS NULL ORDER BY id;
@@ -40,9 +45,10 @@ UPDATE ads SET status = 'offline', updated_at = now()
 WHERE advertiser_id = $1 AND deleted_at IS NULL;
 
 -- name: CreateAd :one
-INSERT INTO ads (advertiser_id, title, media_path, link, stock_total, stock_remaining, expires_at)
+-- 新建默认下架（offline）：须运营手动上架才投放（复刻旧版安全闸）。
+INSERT INTO ads (advertiser_id, title, media_path, link, stock_total, stock_remaining, expires_at, status)
 VALUES (sqlc.arg('advertiser_id'), sqlc.arg('title'), sqlc.arg('media_path'), sqlc.narg('link'),
-        sqlc.arg('stock'), sqlc.arg('stock'), sqlc.narg('expires_at'))
+        sqlc.arg('stock'), sqlc.arg('stock'), sqlc.narg('expires_at'), 'offline')
 RETURNING *;
 
 -- name: ListAds :many
