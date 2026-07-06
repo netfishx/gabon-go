@@ -7,6 +7,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/storage"
 	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
@@ -18,6 +19,7 @@ type Handler struct {
 	Reports   *report.Service
 	Wallets   *wallet.Service
 	Videos    *video.Service
+	Store     *storage.Store
 	CDNBase   string
 }
 
@@ -44,6 +46,7 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/wallet/transactions", h.handleWalletTransactions)
 		r.Get("/team/members", h.handleTeamMembers)
 		r.Get("/team/summary", h.handleTeamSummary)
+		r.Post("/uploads/images", h.handleImageUpload)
 		r.Post("/videos/uploads", h.handleVideoUpload)
 		r.Post("/videos", h.handleVideoConfirm)
 		r.Get("/me/videos", h.handleMyVideos)

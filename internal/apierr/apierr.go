@@ -30,6 +30,9 @@ const (
 
 	CodeWalletInsufficientBalance = "WALLET_INSUFFICIENT_BALANCE"
 
+	CodeUploadPathForbidden = "UPLOAD_PATH_FORBIDDEN"
+	CodeUploadObjectMissing = "UPLOAD_OBJECT_MISSING"
+
 	CodeVideoPathForbidden     = "VIDEO_PATH_FORBIDDEN"
 	CodeVideoObjectMissing     = "VIDEO_OBJECT_MISSING"
 	CodeVideoNotFound          = "VIDEO_NOT_FOUND"

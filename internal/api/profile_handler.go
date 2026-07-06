@@ -21,10 +21,11 @@ const (
 
 // updateProfileRequest 字段缺省（null）= 不更新；提交空串按参数错误处理。
 type updateProfileRequest struct {
-	Name      *string `json:"name"`
-	Signature *string `json:"signature"`
-	Email     *string `json:"email"`
-	Phone     *string `json:"phone"`
+	Name       *string `json:"name"`
+	Signature  *string `json:"signature"`
+	Email      *string `json:"email"`
+	Phone      *string `json:"phone"`
+	AvatarPath *string `json:"avatar_path"`
 }
 
 func (h *Handler) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +33,7 @@ func (h *Handler) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
-	if req.Name == nil && req.Signature == nil && req.Email == nil && req.Phone == nil {
+	if req.Name == nil && req.Signature == nil && req.Email == nil && req.Phone == nil && req.AvatarPath == nil {
 		apierr.Write(w, apierr.InvalidArgument("no fields to update"))
 		return
 	}
@@ -54,18 +55,26 @@ func (h *Handler) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, apierr.InvalidArgument("phone must be a valid CN mobile number"))
 		return
 	}
+	me := customerFrom(r.Context())
+	if req.AvatarPath != nil {
+		if err := h.validateAvatarPath(r, me.ID, *req.AvatarPath); err != nil {
+			apierr.Write(w, err)
+			return
+		}
+	}
 
-	c, err := h.Customers.UpdateProfile(r.Context(), customerFrom(r.Context()).ID, customer.ProfileUpdate{
-		Name:      req.Name,
-		Signature: req.Signature,
-		Email:     req.Email,
-		Phone:     req.Phone,
+	c, err := h.Customers.UpdateProfile(r.Context(), me.ID, customer.ProfileUpdate{
+		Name:       req.Name,
+		Signature:  req.Signature,
+		Email:      req.Email,
+		Phone:      req.Phone,
+		AvatarPath: req.AvatarPath,
 	})
 	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	apierr.WriteJSON(w, http.StatusOK, toCustomerResponse(c))
+	apierr.WriteJSON(w, http.StatusOK, h.toCustomerResponse(c))
 }
 
 // validEmail 要求裸地址（无显示名）且长度合规。

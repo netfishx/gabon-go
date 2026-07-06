@@ -126,8 +126,8 @@ func TestTeamMembersDrillDown(t *testing.T) {
 	if _, ok := first["public_id"].(string); !ok {
 		t.Errorf("member missing public_id: %v", first)
 	}
-	if _, ok := first["avatar_path"]; !ok {
-		t.Errorf("member missing avatar_path field: %v", first)
+	if _, ok := first["avatar_url"]; !ok {
+		t.Errorf("member missing avatar_url field: %v", first)
 	}
 }
 

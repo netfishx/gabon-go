@@ -30,13 +30,14 @@ type customerResponse struct {
 	Signature   *string   `json:"signature"`
 	Email       *string   `json:"email"`
 	Phone       *string   `json:"phone"`
+	AvatarURL   *string   `json:"avatar_url"` // CDN 完整 URL（与视频封面同模式），存储只留 path
 	InviteCode  string    `json:"invite_code"`
 	Valid       bool      `json:"valid"`
 	InviteCount int32     `json:"invite_count"` // 总邀请数（注册即算），区别于 /me 的 valid_invite_count
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-func toCustomerResponse(c *db.Customer) customerResponse {
+func (h *Handler) toCustomerResponse(c *db.Customer) customerResponse {
 	return customerResponse{
 		PublicID:    c.PublicID,
 		Username:    c.Username,
@@ -44,6 +45,7 @@ func toCustomerResponse(c *db.Customer) customerResponse {
 		Signature:   c.Signature,
 		Email:       c.Email,
 		Phone:       c.Phone,
+		AvatarURL:   h.mediaURL(c.AvatarPath),
 		InviteCode:  c.InviteCode,
 		Valid:       c.ValidAt.Valid,
 		InviteCount: c.InviteCount,
@@ -70,7 +72,7 @@ func (h *Handler) handleRegister(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	apierr.WriteJSON(w, http.StatusCreated, toCustomerResponse(c))
+	apierr.WriteJSON(w, http.StatusCreated, h.toCustomerResponse(c))
 }
 
 type loginRequest struct {
@@ -98,7 +100,7 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
-	apierr.WriteJSON(w, http.StatusOK, loginResponse{Token: token, Customer: toCustomerResponse(c)})
+	apierr.WriteJSON(w, http.StatusOK, loginResponse{Token: token, Customer: h.toCustomerResponse(c)})
 }
 
 // meResponse /me 在通用客户信息外附带有效邀请数（现算计数，仅本端点提供）。
@@ -115,7 +117,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apierr.WriteJSON(w, http.StatusOK, meResponse{
-		customerResponse: toCustomerResponse(c),
+		customerResponse: h.toCustomerResponse(c),
 		ValidInviteCount: validInvites,
 	})
 }
