@@ -1008,6 +1008,13 @@ type Wallet struct {
 	UpdatedAt  pgtype.Timestamptz
 }
 
+type WatchProgressMark struct {
+	CustomerID int64
+	VideoID    int64
+	PeriodKey  string
+	CreatedAt  pgtype.Timestamptz
+}
+
 type WithdrawalOrder struct {
 	ID              int64
 	OrderNo         string

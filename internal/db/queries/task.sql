@@ -29,16 +29,11 @@ SELECT v.reward_multiplier_bp FROM customers c
 JOIN vip_level_configs v ON v.level = c.vip_level
 WHERE c.id = $1;
 
--- name: IsFirstValidPlayInPeriod :one
--- watch 防刷：周期内该客户×该视频仅 id 最小的有效播放推进——并发上报下也恰好一次。
-SELECT (NOT EXISTS (
-    SELECT 1 FROM plays p2
-    WHERE p2.customer_id = sqlc.arg('customer_id')
-      AND p2.video_id = (SELECT p1.video_id FROM plays p1 WHERE p1.id = sqlc.arg('play_id'))
-      AND p2.valid_at IS NOT NULL
-      AND p2.valid_at >= sqlc.arg('period_start')
-      AND p2.id < sqlc.arg('play_id')
-))::bool;
+-- name: MarkWatchProgress :execrows
+-- watch 防刷标记（推进事务内执行）：唯一约束仲裁并发，0 行 = 本周期该视频已计过。
+INSERT INTO watch_progress_marks (customer_id, video_id, period_key)
+VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING;
 
 -- name: ListTaskProgressForKeys :many
 SELECT * FROM periodic_task_progress

@@ -121,13 +121,13 @@ func (h *Handler) handleValidPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := customerFrom(r.Context())
-	marked, err := h.Videos.MarkValid(r.Context(), c.ID, id)
+	videoID, marked, err := h.Videos.MarkValid(r.Context(), c.ID, id)
 	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
 	if marked {
-		h.advanceTask(r.Context(), c.ID, db.TaskCategoryWatchVideo, id)
+		h.advanceTask(r.Context(), c.ID, db.TaskCategoryWatchVideo, videoID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

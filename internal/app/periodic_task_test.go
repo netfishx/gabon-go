@@ -91,6 +91,19 @@ func TestWatchTaskEndToEnd(t *testing.T) {
 	if got := first["type"]; got != "periodic_task_reward" {
 		t.Errorf("tx type = %v, want periodic_task_reward", got)
 	}
+	// 流水 ref = 进度行 id（ref 无对应 API，走 DB 观察）
+	var refMatches int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM transactions t
+		 JOIN periodic_task_progress p ON p.id = t.ref_id AND p.customer_id = t.customer_id
+		 WHERE t.type = 'periodic_task_reward'
+		   AND t.customer_id = (SELECT id FROM customers WHERE username = $1)`,
+		username).Scan(&refMatches); err != nil {
+		t.Fatalf("query reward ref: %v", err)
+	}
+	if refMatches != 1 {
+		t.Errorf("reward tx with ref=progress row = %d, want 1", refMatches)
+	}
 
 	// 超出目标继续播放：进度封顶、不再发奖
 	extra := stageOthersVideos(t, 1)
@@ -162,6 +175,31 @@ func TestCommentTaskGrant(t *testing.T) {
 	}
 	if got := availableOf(t, token); got != 58 {
 		t.Fatalf("available = %d, want 58", got)
+	}
+}
+
+func TestRewardMultipliedByVipLevel(t *testing.T) {
+	// 铜牌档 12000bp：58 × 1.2 = 69.6 → floor 69
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	cid := customerIDOf(t, username)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE customers SET vip_level = 1 WHERE id = $1`, cid); err != nil {
+		t.Fatalf("stage vip level: %v", err)
+	}
+
+	videos := stageOthersVideos(t, 5)
+	for i, pid := range videos {
+		resp, body := postJSON(t, "/api/v1/videos/"+pid+"/comments", map[string]any{
+			"content": fmt.Sprintf("好看 %d", i),
+		}, token)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("comment %d: status = %d, body = %v", i, resp.StatusCode, body)
+		}
+	}
+	if got := availableOf(t, token); got != 69 {
+		t.Fatalf("available = %d, want 69 (floor(58×1.2))", got)
 	}
 }
 

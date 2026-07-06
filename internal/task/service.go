@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/db"
@@ -31,43 +30,43 @@ func NewService(pool *pgxpool.Pool, wallets *wallet.Service) *Service {
 // Advance 推进某客户在该类别下全部启用任务的当期进度。
 // 独立事务自管：调用方（客户面编排层）须在主事件事务提交后调用，
 // 失败由调用方记日志、不回传主链路（PRD #45 架构）。
-// refID：watch_video 传有效播放事件 id（防刷判定用），其余类别忽略。
-func (s *Service) Advance(ctx context.Context, customerID int64, category db.TaskCategory, refID int64) error {
+// subjectID：watch_video 传视频 id（防刷标记的主体），其余类别忽略。
+func (s *Service) Advance(ctx context.Context, customerID int64, category db.TaskCategory, subjectID int64) error {
 	tasks, err := s.q.ListEnabledPeriodicTasksByCategory(ctx, category)
 	if err != nil {
 		return fmt.Errorf("list tasks by category: %w", err)
 	}
 	now := time.Now().In(tz.Shanghai)
 	for _, t := range tasks {
-		if err := s.advanceOne(ctx, customerID, t, refID, now); err != nil {
+		if err := s.advanceOne(ctx, customerID, t, subjectID, now); err != nil {
 			return fmt.Errorf("advance task %d: %w", t.ID, err)
 		}
 	}
 	return nil
 }
 
-// advanceOne 单任务推进：进度 UPSERT + 达标翻转 + 发奖同一事务原子完成。
+// advanceOne 单任务推进：防刷标记 + 进度 UPSERT + 达标翻转 + 发奖同一事务原子完成。
 // 幂等三层：进度行唯一键 / reward_granted_at 条件翻转 / 流水 (type, ref) 唯一约束。
-func (s *Service) advanceOne(ctx context.Context, customerID int64, t db.PeriodicTask, refID int64, now time.Time) error {
-	key, start := periodOf(t.Period, now)
-
-	// watch 防刷：每客户×视频×周期仅首次有效播放推进（id 最小者胜，并发下恰好一次）
-	if t.Category == db.TaskCategoryWatchVideo {
-		first, err := s.q.IsFirstValidPlayInPeriod(ctx, db.IsFirstValidPlayInPeriodParams{
-			CustomerID:  customerID,
-			PlayID:      refID,
-			PeriodStart: pgtype.Timestamptz{Time: start, Valid: true},
-		})
-		if err != nil {
-			return fmt.Errorf("watch dedup check: %w", err)
-		}
-		if !first {
-			return nil
-		}
-	}
+func (s *Service) advanceOne(ctx context.Context, customerID int64, t db.PeriodicTask, subjectID int64, now time.Time) error {
+	key, _ := periodOf(t.Period, now)
 
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
+
+		// watch 防刷：每客户×视频×周期唯一标记与增量同事务——
+		// 唯一约束仲裁并发上报，恰好一次（PR #50 review P1：读后写判定会双计）
+		if t.Category == db.TaskCategoryWatchVideo {
+			marked, err := q.MarkWatchProgress(ctx, db.MarkWatchProgressParams{
+				CustomerID: customerID, VideoID: subjectID, PeriodKey: key,
+			})
+			if err != nil {
+				return fmt.Errorf("mark watch progress: %w", err)
+			}
+			if marked == 0 {
+				return nil // 本周期该视频已计过
+			}
+		}
+
 		row, err := q.UpsertTaskProgress(ctx, db.UpsertTaskProgressParams{
 			CustomerID: customerID,
 			TaskID:     t.ID,

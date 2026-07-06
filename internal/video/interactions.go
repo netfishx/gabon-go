@@ -179,24 +179,24 @@ func (s *Service) Play(ctx context.Context, customerID int64, publicID string) (
 }
 
 // MarkValid 有效播放：同一事件 id 只计一次（条件 UPDATE），重复上报与他人事件均幂等静默。
-// marked 仅首次标记为 true（任务进度事件源以此为准，重复上报不推进）。
-func (s *Service) MarkValid(ctx context.Context, customerID, playID int64) (marked bool, err error) {
+// marked 仅首次标记为 true，并回传 videoID（任务进度事件源：仅首次推进，防刷主体为视频）。
+func (s *Service) MarkValid(ctx context.Context, customerID, playID int64) (videoID int64, marked bool, err error) {
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		videoID, err := q.MarkPlayValid(ctx, db.MarkPlayValidParams{ID: playID, CustomerID: customerID})
+		vid, err := q.MarkPlayValid(ctx, db.MarkPlayValidParams{ID: playID, CustomerID: customerID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // 已标记 / 不存在 / 非本人：幂等静默，不泄露存在性
 		}
 		if err != nil {
 			return err
 		}
-		marked = true
-		return q.BumpVideoCounters(ctx, bump(videoID, db.BumpVideoCountersParams{ValidDelta: 1, HotDelta: hotValid}))
+		videoID, marked = vid, true
+		return q.BumpVideoCounters(ctx, bump(vid, db.BumpVideoCountersParams{ValidDelta: 1, HotDelta: hotValid}))
 	})
 	if err != nil {
-		return false, fmt.Errorf("mark valid play: %w", err)
+		return 0, false, fmt.Errorf("mark valid play: %w", err)
 	}
-	return marked, nil
+	return videoID, marked, nil
 }
 
 func bump(videoID int64, p db.BumpVideoCountersParams) db.BumpVideoCountersParams {

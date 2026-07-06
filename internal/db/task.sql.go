@@ -7,8 +7,6 @@ package db
 
 import (
 	"context"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getCustomerRewardMultiplierBp = `-- name: GetCustomerRewardMultiplierBp :one
@@ -43,31 +41,6 @@ func (q *Queries) GrantTaskRewardIfDue(ctx context.Context, arg GrantTaskRewardI
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const isFirstValidPlayInPeriod = `-- name: IsFirstValidPlayInPeriod :one
-SELECT (NOT EXISTS (
-    SELECT 1 FROM plays p2
-    WHERE p2.customer_id = $1
-      AND p2.video_id = (SELECT p1.video_id FROM plays p1 WHERE p1.id = $2)
-      AND p2.valid_at IS NOT NULL
-      AND p2.valid_at >= $3
-      AND p2.id < $2
-))::bool
-`
-
-type IsFirstValidPlayInPeriodParams struct {
-	CustomerID  int64
-	PlayID      int64
-	PeriodStart pgtype.Timestamptz
-}
-
-// watch 防刷：周期内该客户×该视频仅 id 最小的有效播放推进——并发上报下也恰好一次。
-func (q *Queries) IsFirstValidPlayInPeriod(ctx context.Context, arg IsFirstValidPlayInPeriodParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isFirstValidPlayInPeriod, arg.CustomerID, arg.PlayID, arg.PeriodStart)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
 }
 
 const listEnabledPeriodicTasks = `-- name: ListEnabledPeriodicTasks :many
@@ -190,6 +163,27 @@ func (q *Queries) ListTaskProgressForKeys(ctx context.Context, arg ListTaskProgr
 		return nil, err
 	}
 	return items, nil
+}
+
+const markWatchProgress = `-- name: MarkWatchProgress :execrows
+INSERT INTO watch_progress_marks (customer_id, video_id, period_key)
+VALUES ($1, $2, $3)
+ON CONFLICT DO NOTHING
+`
+
+type MarkWatchProgressParams struct {
+	CustomerID int64
+	VideoID    int64
+	PeriodKey  string
+}
+
+// watch 防刷标记（推进事务内执行）：唯一约束仲裁并发，0 行 = 本周期该视频已计过。
+func (q *Queries) MarkWatchProgress(ctx context.Context, arg MarkWatchProgressParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markWatchProgress, arg.CustomerID, arg.VideoID, arg.PeriodKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertTaskProgress = `-- name: UpsertTaskProgress :one
