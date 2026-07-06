@@ -25,7 +25,7 @@ func validVipLevel(level int32) bool {
 	return level >= 0 && level <= maxVipLevel
 }
 
-func taskIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
+func idParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		apierr.Write(w, apierr.InvalidArgument("malformed id"))
@@ -118,7 +118,7 @@ type updatePeriodicTaskRequest struct {
 }
 
 func (h *Handler) handleUpdatePeriodicTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
@@ -228,7 +228,7 @@ type updateClaimTaskRequest struct {
 }
 
 func (h *Handler) handleUpdateClaimTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
@@ -267,28 +267,11 @@ type toggleStatusRequest struct {
 }
 
 func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
-	if !ok {
-		return
-	}
-	var req toggleStatusRequest
-	if !apierr.DecodeJSON(w, r, &req) {
-		return
-	}
-	// 破坏性 toggle：enabled 缺失（{} 或拼错字段）不得静默下架
-	if req.Enabled == nil {
-		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
-		return
-	}
-	if err := h.Tasks.SetClaimTaskEnabled(r.Context(), id, *req.Enabled); err != nil {
-		apierr.Write(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
+	h.toggleStatus(w, r, h.Tasks.SetClaimTaskEnabled)
 }
 
 func (h *Handler) handleDeleteClaimTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}

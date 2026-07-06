@@ -4,6 +4,7 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
+	"github.com/netfishx/gabon-go/internal/ad"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
@@ -25,6 +26,7 @@ type Handler struct {
 	Tasks     *task.Service
 	SignIns   *signin.Service
 	Vips      *vip.Service
+	Ads       *ad.Service
 	Store     *storage.Store
 	CDNBase   string
 }
@@ -57,6 +59,7 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/sign-in/status", h.handleSignInStatus)
 		r.Post("/vip/purchase", h.handleVipPurchase)
 		r.Get("/vip/levels", h.handleVipLevels)
+		r.Post("/ads/watch", h.handleWatchAd)
 		r.Get("/claim-tasks", h.handleClaimTaskList)
 		r.Get("/claim-tasks/mine", h.handleMyClaims)
 		r.Get("/claim-tasks/{taskID}", h.handleClaimTaskDetail)

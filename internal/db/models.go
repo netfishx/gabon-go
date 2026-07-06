@@ -696,6 +696,7 @@ type Ad struct {
 	DeletedAt      pgtype.Timestamptz
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	ExpiresAt      pgtype.Timestamptz
 }
 
 type AdWatch struct {
