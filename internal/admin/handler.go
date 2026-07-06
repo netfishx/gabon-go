@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/netfishx/gabon-go/internal/ad"
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/db"
@@ -20,6 +21,7 @@ type Handler struct {
 	Tokens *auth.TokenIssuer
 	Videos *video.Service
 	Tasks  *task.Service
+	Ads    *ad.Service
 }
 
 // Routes 组装后台面路由。
@@ -50,6 +52,16 @@ func (h *Handler) Routes() chi.Router {
 			r.Patch("/claim-tasks/{id}", h.handleUpdateClaimTask)
 			r.Patch("/claim-tasks/{id}/status", h.handleToggleClaimTaskStatus)
 			r.Delete("/claim-tasks/{id}", h.handleDeleteClaimTask)
+
+			r.Get("/advertisers", h.handleListAdvertisers)
+			r.Post("/advertisers", h.handleCreateAdvertiser)
+			r.Patch("/advertisers/{id}", h.handleUpdateAdvertiser)
+			r.Patch("/advertisers/{id}/status", h.handleSetAdvertiserStatus)
+			r.Get("/ads", h.handleListAds)
+			r.Post("/ads", h.handleCreateAd)
+			r.Patch("/ads/{id}", h.handleUpdateAd)
+			r.Patch("/ads/{id}/status", h.handleSetAdStatus)
+			r.Delete("/ads/{id}", h.handleDeleteAd)
 		})
 	})
 	return r

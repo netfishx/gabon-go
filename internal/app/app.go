@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/netfishx/gabon-go/internal/ad"
 	"github.com/netfishx/gabon-go/internal/admin"
 	"github.com/netfishx/gabon-go/internal/api"
 	"github.com/netfishx/gabon-go/internal/auth"
@@ -81,6 +82,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	tasks := task.NewService(pool, wallets)
 	signIns := signin.NewService(pool, wallets)
 	vips := vip.NewService(pool, wallets)
+	ads := ad.NewService(pool)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -97,6 +99,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Tasks:     tasks,
 		SignIns:   signIns,
 		Vips:      vips,
+		Ads:       ads,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}
@@ -107,6 +110,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Tokens: tokens,
 		Videos: videoSvc,
 		Tasks:  tasks,
+		Ads:    ads,
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 

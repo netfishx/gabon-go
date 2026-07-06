@@ -25,7 +25,7 @@ func validVipLevel(level int32) bool {
 	return level >= 0 && level <= maxVipLevel
 }
 
-func taskIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
+func idParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
 		apierr.Write(w, apierr.InvalidArgument("malformed id"))
@@ -118,7 +118,7 @@ type updatePeriodicTaskRequest struct {
 }
 
 func (h *Handler) handleUpdatePeriodicTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
@@ -228,7 +228,7 @@ type updateClaimTaskRequest struct {
 }
 
 func (h *Handler) handleUpdateClaimTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
@@ -267,7 +267,7 @@ type toggleStatusRequest struct {
 }
 
 func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Req
 }
 
 func (h *Handler) handleDeleteClaimTask(w http.ResponseWriter, r *http.Request) {
-	id, ok := taskIDParam(w, r)
+	id, ok := idParam(w, r)
 	if !ok {
 		return
 	}
