@@ -86,10 +86,11 @@ WHERE customer_id = $1 AND type = 'invite_valid_reward';
 
 -- name: UpdateCustomerProfile :one
 UPDATE customers
-SET name       = COALESCE(sqlc.narg('name'), name),
-    signature  = COALESCE(sqlc.narg('signature'), signature),
-    email      = COALESCE(sqlc.narg('email'), email),
-    phone      = COALESCE(sqlc.narg('phone'), phone),
-    updated_at = now()
+SET name        = COALESCE(sqlc.narg('name'), name),
+    signature   = COALESCE(sqlc.narg('signature'), signature),
+    email       = COALESCE(sqlc.narg('email'), email),
+    phone       = COALESCE(sqlc.narg('phone'), phone),
+    avatar_path = COALESCE(sqlc.narg('avatar_path'), avatar_path),
+    updated_at  = now()
 WHERE id = sqlc.arg('id')
 RETURNING *;

@@ -16,7 +16,7 @@ type teamMemberItem struct {
 	PublicID         string  `json:"public_id"`
 	Username         string  `json:"username"`
 	Name             *string `json:"name"`
-	AvatarPath       *string `json:"avatar_path"`
+	AvatarURL        *string `json:"avatar_url"` // CDN 完整 URL，与客户信息响应一致
 	Valid            bool    `json:"valid"`
 	SubordinateCount int64   `json:"subordinate_count"`
 }
@@ -34,7 +34,8 @@ func (h *Handler) handleTeamMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, next, err := h.Customers.ListTeamMembers(
-		r.Context(), customerFrom(r.Context()), r.URL.Query().Get("parent"), cursor, limit)
+		r.Context(), customerFrom(r.Context()), r.URL.Query().Get("parent"), cursor, limit,
+	)
 	if err != nil {
 		apierr.Write(w, err)
 		return
@@ -45,7 +46,7 @@ func (h *Handler) handleTeamMembers(w http.ResponseWriter, r *http.Request) {
 			PublicID:         m.PublicID,
 			Username:         m.Username,
 			Name:             m.Name,
-			AvatarPath:       m.AvatarPath,
+			AvatarURL:        h.mediaURL(m.AvatarPath),
 			Valid:            m.Valid,
 			SubordinateCount: m.SubordinateCount,
 		})

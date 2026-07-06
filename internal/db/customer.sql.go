@@ -416,21 +416,23 @@ func (q *Queries) UpdateCustomerPassword(ctx context.Context, arg UpdateCustomer
 
 const updateCustomerProfile = `-- name: UpdateCustomerProfile :one
 UPDATE customers
-SET name       = COALESCE($1, name),
-    signature  = COALESCE($2, signature),
-    email      = COALESCE($3, email),
-    phone      = COALESCE($4, phone),
-    updated_at = now()
-WHERE id = $5
+SET name        = COALESCE($1, name),
+    signature   = COALESCE($2, signature),
+    email       = COALESCE($3, email),
+    phone       = COALESCE($4, phone),
+    avatar_path = COALESCE($5, avatar_path),
+    updated_at  = now()
+WHERE id = $6
 RETURNING id, public_id, username, password_hash, password_changed_at, name, phone, email, avatar_path, signature, invite_code, inviter_id, ancestors, valid_at, vip_level, status, withdrawal_password_hash, video_count, invite_count, follower_count, following_count, last_login_at, deleted_at, created_at, updated_at
 `
 
 type UpdateCustomerProfileParams struct {
-	Name      *string
-	Signature *string
-	Email     *string
-	Phone     *string
-	ID        int64
+	Name       *string
+	Signature  *string
+	Email      *string
+	Phone      *string
+	AvatarPath *string
+	ID         int64
 }
 
 func (q *Queries) UpdateCustomerProfile(ctx context.Context, arg UpdateCustomerProfileParams) (Customer, error) {
@@ -439,6 +441,7 @@ func (q *Queries) UpdateCustomerProfile(ctx context.Context, arg UpdateCustomerP
 		arg.Signature,
 		arg.Email,
 		arg.Phone,
+		arg.AvatarPath,
 		arg.ID,
 	)
 	var i Customer

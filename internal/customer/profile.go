@@ -13,11 +13,13 @@ import (
 )
 
 // ProfileUpdate 资料修改参数：nil = 该字段不更新（不支持清除已填联系方式）。
+// AvatarPath 的归属/存在校验由 api 层完成（需要对象存储访问）。
 type ProfileUpdate struct {
-	Name      *string
-	Signature *string
-	Email     *string
-	Phone     *string
+	Name       *string
+	Signature  *string
+	Email      *string
+	Phone      *string
+	AvatarPath *string
 }
 
 // UpdateProfile 更新客户资料。email 写入侧归一为全小写；
@@ -33,11 +35,12 @@ func (s *Service) UpdateProfile(ctx context.Context, customerID int64, p Profile
 		q := s.q.WithTx(tx)
 		var err error
 		c, err = q.UpdateCustomerProfile(ctx, db.UpdateCustomerProfileParams{
-			ID:        customerID,
-			Name:      p.Name,
-			Signature: p.Signature,
-			Email:     p.Email,
-			Phone:     p.Phone,
+			ID:         customerID,
+			Name:       p.Name,
+			Signature:  p.Signature,
+			Email:      p.Email,
+			Phone:      p.Phone,
+			AvatarPath: p.AvatarPath,
 		})
 		if err != nil {
 			return err
