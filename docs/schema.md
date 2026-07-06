@@ -215,7 +215,7 @@ task_claims             id, customer_id, task_id, status claim_status,
 
 - 周期进度 **period_key 行模式**：新周期首个事件 UPSERT 新行，无预生成、无重置 cron（旧版每日 00:00:05 重置 cron 消失——实现简化，对外行为等价）；"过期/已完成"由 `period_key`/`progress>=target` 推导，不设状态列
 - 达标发奖与进度事件同事务；手动补领 = `WHERE reward_granted_at IS NULL` 条件 UPDATE（行为差异 #8）
-- 限时任务过期 cron（每 5 分钟）保留：超时未提交的 claim 翻 `expired`
+- 限时任务过期 cron（每 5 分钟）保留：超时的 `claimed`/`rejected` claim 翻 `expired`；`submitted`（待审核）与 `rewarded` 豁免（M5 #37 定稿：用户已尽义务不作废，积压属运营问题）
 
 ## 签到活动
 

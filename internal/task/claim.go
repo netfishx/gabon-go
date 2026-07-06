@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
@@ -19,6 +20,18 @@ const maxProofImages = 9
 
 func claimNotFound() *apierr.Error {
 	return apierr.New(http.StatusNotFound, apierr.CodeClaimTaskNotFound, "claim task not found")
+}
+
+// withinClaimWindow 领取窗口判定：starts_at ≤ now < ends_at（空值即该端无界）。
+// 领取校验与列表分组共用同一口径。
+func withinClaimWindow(startsAt, endsAt pgtype.Timestamptz, now time.Time) bool {
+	if startsAt.Valid && now.Before(startsAt.Time) {
+		return false
+	}
+	if endsAt.Valid && !now.Before(endsAt.Time) {
+		return false
+	}
+	return true
 }
 
 // Claim 领取限时任务：窗口内 + VIP 门槛 + 一人一次（唯一约束）；
@@ -36,8 +49,7 @@ func (s *Service) Claim(ctx context.Context, customerID int64, vipLevel int32, t
 		return 0, apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
 	}
 	now := time.Now().In(tz.Shanghai)
-	if task.StartsAt.Valid && now.Before(task.StartsAt.Time) ||
-		task.EndsAt.Valid && !now.Before(task.EndsAt.Time) {
+	if !withinClaimWindow(task.StartsAt, task.EndsAt, now) {
 		return 0, apierr.New(http.StatusConflict, apierr.CodeClaimTaskWindowClosed, "task is not within its claim window")
 	}
 	if task.MinVipLevel > vipLevel {

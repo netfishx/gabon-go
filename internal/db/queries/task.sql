@@ -85,3 +85,40 @@ JOIN claim_tasks ct ON ct.id = tc.task_id
 WHERE tc.status = 'submitted' AND tc.id > sqlc.arg('cursor')
 ORDER BY tc.id
 LIMIT sqlc.arg('row_limit');
+
+-- name: ExpireClaims :execrows
+-- 过期作废 {claimed, rejected}：待审核与已发奖豁免（cron 每 5 分钟）。
+UPDATE task_claims
+SET status = 'expired', updated_at = now()
+WHERE expires_at IS NOT NULL AND expires_at < now()
+  AND status IN ('claimed', 'rejected');
+
+-- name: ListClaimTasksForCustomer :many
+-- 客户面可领取列表：启用未删的全部限时任务 + 查看者领取状态（三态分组在应用层算）。
+SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
+       ct.requirement, ct.flow, ct.link, ct.starts_at, ct.ends_at,
+       tc.status AS claim_status
+FROM claim_tasks ct
+LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
+WHERE ct.enabled AND ct.deleted_at IS NULL
+ORDER BY ct.display_order, ct.id;
+
+-- name: GetClaimTaskForCustomer :one
+-- 任务详情 + 查看者领取状态。可见性：上架未删的公开可见；已下架/软删的仅本人有领取记录时可看历史，
+-- 否则无行（404）——不向路人泄露已撤下的任务定义。
+SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
+       ct.requirement, ct.flow, ct.link, ct.starts_at, ct.ends_at, ct.deleted_at,
+       tc.status AS claim_status
+FROM claim_tasks ct
+LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
+WHERE ct.id = $2
+  AND ((ct.enabled AND ct.deleted_at IS NULL) OR tc.id IS NOT NULL);
+
+-- name: ListMyClaims :many
+-- 我的领取记录：进行中 {claimed,submitted,rejected} / 已完成 {rewarded,expired}（id 降序）。
+SELECT tc.id, tc.status, tc.reward_base, tc.reward_granted, tc.review_remark,
+       tc.claimed_at, tc.rewarded_at, ct.name AS task_name
+FROM task_claims tc
+JOIN claim_tasks ct ON ct.id = tc.task_id
+WHERE tc.customer_id = $1 AND tc.status::text = ANY(sqlc.arg('statuses')::text[])
+ORDER BY tc.id DESC;
