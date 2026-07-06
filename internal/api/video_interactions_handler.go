@@ -8,13 +8,19 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
+	"github.com/netfishx/gabon-go/internal/db"
 	"github.com/netfishx/gabon-go/internal/pagination"
 )
 
 func (h *Handler) handleLike(w http.ResponseWriter, r *http.Request) {
-	if err := h.Videos.Like(r.Context(), customerFrom(r.Context()).ID, chi.URLParam(r, "publicID")); err != nil {
+	c := customerFrom(r.Context())
+	counted, err := h.Videos.Like(r.Context(), c.ID, chi.URLParam(r, "publicID"))
+	if err != nil {
 		apierr.Write(w, err)
 		return
+	}
+	if counted {
+		h.advanceTask(r.Context(), c.ID, db.TaskCategoryLike, 0)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -49,6 +55,7 @@ func (h *Handler) handleComment(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, err)
 		return
 	}
+	h.advanceTask(r.Context(), c.ID, db.TaskCategoryComment, 0)
 	apierr.WriteJSON(w, http.StatusCreated, commentItem{
 		ID:        created.ID,
 		Content:   created.Content,
@@ -113,9 +120,14 @@ func (h *Handler) handleValidPlay(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, apierr.InvalidArgument("malformed play id"))
 		return
 	}
-	if err := h.Videos.MarkValid(r.Context(), customerFrom(r.Context()).ID, id); err != nil {
+	c := customerFrom(r.Context())
+	marked, err := h.Videos.MarkValid(r.Context(), c.ID, id)
+	if err != nil {
 		apierr.Write(w, err)
 		return
+	}
+	if marked {
+		h.advanceTask(r.Context(), c.ID, db.TaskCategoryWatchVideo, id)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
