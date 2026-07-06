@@ -28,17 +28,18 @@ func stageClaimTask(t *testing.T, reward int64, minVip int, startsAt, endsAt tim
 	return id
 }
 
-// claimIDOf 查某客户对某任务的领取记录 id。
-func claimIDOf(t *testing.T, username string, taskID int64) int64 {
+// claimTask 领取任务并从响应体取 claim_id（公开接口，不走 DB 直查）。
+func claimTask(t *testing.T, token string, taskID int64) int64 {
 	t.Helper()
-	var id int64
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT tc.id FROM task_claims tc
-		 JOIN customers c ON c.id = tc.customer_id
-		 WHERE c.username = $1 AND tc.task_id = $2`, username, taskID).Scan(&id); err != nil {
-		t.Fatalf("query claim id: %v", err)
+	resp, body := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("claim: status = %d, body = %v", resp.StatusCode, body)
 	}
-	return id
+	id, _ := body["claim_id"].(float64)
+	if id == 0 {
+		t.Fatalf("claim: missing claim_id, body = %v", body)
+	}
+	return int64(id)
 }
 
 // uploadProof 走 L 通道真上传一张证明图，返回 storage_path。
@@ -79,16 +80,12 @@ func TestClaimTaskHappyPath(t *testing.T) {
 	token := loginCustomer(t, username, "secret123")
 	adminToken := loginAdmin(t)
 
-	// 领取
-	resp, body := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("claim: status = %d, body = %v", resp.StatusCode, body)
-	}
-	claimID := claimIDOf(t, username, taskID)
+	// 领取：响应体直出 claim_id，客户据此提交证明（无需外部查库）
+	claimID := claimTask(t, token, taskID)
 
 	// 提交证明（1-9 张，本人 proofs 前缀）
 	proof := uploadProof(t, token)
-	resp, body = postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID), map[string]any{
+	resp, body := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID), map[string]any{
 		"proof_text": "已完成", "proof_images": []string{proof},
 	}, token)
 	if resp.StatusCode != http.StatusNoContent {
@@ -126,8 +123,7 @@ func TestClaimTaskRewardUsesReviewTimeVip(t *testing.T) {
 	cid := customerIDOf(t, username)
 	adminToken := loginAdmin(t)
 
-	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	claimID := claimIDOf(t, username, taskID)
+	claimID := claimTask(t, token, taskID)
 	proof := uploadProof(t, token)
 	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID), map[string]any{
 		"proof_images": []string{proof},
@@ -166,9 +162,7 @@ func TestClaimTaskClaimGuards(t *testing.T) {
 	})
 	t.Run("double_claim", func(t *testing.T) {
 		taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
-		if resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token); resp.StatusCode != http.StatusNoContent {
-			t.Fatalf("first claim failed")
-		}
+		claimTask(t, token, taskID) // 首次领取拿到 201 + claim_id
 		resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
 		if resp.StatusCode != http.StatusConflict {
 			t.Errorf("double claim: status = %d, want 409", resp.StatusCode)
@@ -182,8 +176,7 @@ func TestClaimTaskProofGuards(t *testing.T) {
 	username := uniqueUsername(t)
 	registerCustomer(t, username, "")
 	token := loginCustomer(t, username, "secret123")
-	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	claimID := claimIDOf(t, username, taskID)
+	claimID := claimTask(t, token, taskID)
 
 	other := uniqueUsername(t)
 	registerCustomer(t, other, "")
@@ -223,8 +216,7 @@ func TestClaimTaskSubmittedNotResubmittable(t *testing.T) {
 	username := uniqueUsername(t)
 	registerCustomer(t, username, "")
 	token := loginCustomer(t, username, "secret123")
-	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	claimID := claimIDOf(t, username, taskID)
+	claimID := claimTask(t, token, taskID)
 
 	if resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
 		map[string]any{"proof_images": []string{uploadProof(t, token)}}, token); resp.StatusCode != http.StatusNoContent {
@@ -250,8 +242,7 @@ func TestClaimTaskNoReclaimAfterRejectOrExpire(t *testing.T) {
 		username := uniqueUsername(t)
 		registerCustomer(t, username, "")
 		token := loginCustomer(t, username, "secret123")
-		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-		claimID := claimIDOf(t, username, taskID)
+		claimID := claimTask(t, token, taskID)
 		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
 			map[string]any{"proof_images": []string{uploadProof(t, token)}}, token)
 		postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/reject", claimID),
@@ -268,8 +259,7 @@ func TestClaimTaskNoReclaimAfterRejectOrExpire(t *testing.T) {
 		username := uniqueUsername(t)
 		registerCustomer(t, username, "")
 		token := loginCustomer(t, username, "secret123")
-		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-		claimID := claimIDOf(t, username, taskID)
+		claimID := claimTask(t, token, taskID)
 		// 直接把领取记录翻到 expired（过期 cron 属 #48，这里只验"过期后不可重领"）
 		if _, err := testPool.Exec(context.Background(),
 			`UPDATE task_claims SET status = 'expired' WHERE id = $1`, claimID); err != nil {
@@ -290,8 +280,7 @@ func TestClaimTaskRejectAndResubmit(t *testing.T) {
 	token := loginCustomer(t, username, "secret123")
 	adminToken := loginAdmin(t)
 
-	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	claimID := claimIDOf(t, username, taskID)
+	claimID := claimTask(t, token, taskID)
 	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
 		map[string]any{"proof_images": []string{uploadProof(t, token)}}, token)
 
@@ -318,14 +307,58 @@ func TestClaimTaskRejectAndResubmit(t *testing.T) {
 	}
 }
 
+func TestReviewQueueShowsSnapshotReward(t *testing.T) {
+	// 领取后运营改定义奖励：审核队列须显示领取快照值（与实际发奖口径一致），非当前定义值
+	now := time.Now()
+	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	adminToken := loginAdmin(t)
+
+	claimID := claimTask(t, token, taskID) // 快照 reward_base=100
+	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
+		map[string]any{"proof_images": []string{uploadProof(t, token)}}, token)
+
+	// 运营改定义奖励为 999（不影响已领取快照）
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE claim_tasks SET reward = 999 WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("bump task reward: %v", err)
+	}
+
+	resp, body := getJSON(t, "/admin/v1/claim-tasks/reviews", adminToken)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("review queue: status = %d, body = %v", resp.StatusCode, body)
+	}
+	items, _ := body["items"].([]any)
+	var found bool
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		if int64(m["claim_id"].(float64)) == claimID {
+			found = true
+			if r, _ := m["reward"].(float64); int64(r) != 100 {
+				t.Errorf("queue reward = %v, want 100 (snapshot, not current 999)", m["reward"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("claim %d not in review queue", claimID)
+	}
+
+	// 审核实发 = 快照 100（与队列显示一致）
+	postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/approve", claimID), nil, adminToken)
+	if got := availableOf(t, token); got != 100 {
+		t.Errorf("granted = %d, want 100 (snapshot payout)", got)
+	}
+}
+
 func TestClaimReviewRequiresAdminRole(t *testing.T) {
 	now := time.Now()
 	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
 	username := uniqueUsername(t)
 	registerCustomer(t, username, "")
 	token := loginCustomer(t, username, "secret123")
-	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
-	claimID := claimIDOf(t, username, taskID)
+	claimID := claimTask(t, token, taskID)
 
 	// NORMAL 管理员被拒
 	normalToken := loginNormalAdmin(t)

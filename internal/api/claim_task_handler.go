@@ -25,11 +25,12 @@ func (h *Handler) handleClaimTaskClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := customerFrom(r.Context())
-	if err := h.Tasks.Claim(r.Context(), c.ID, c.VipLevel, taskID); err != nil {
+	claimID, err := h.Tasks.Claim(r.Context(), c.ID, c.VipLevel, taskID)
+	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	apierr.WriteJSON(w, http.StatusCreated, map[string]int64{"claim_id": claimID})
 }
 
 type submitProofRequest struct {

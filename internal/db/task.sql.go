@@ -251,7 +251,7 @@ func (q *Queries) ListEnabledPeriodicTasksByCategory(ctx context.Context, catego
 
 const listPendingClaims = `-- name: ListPendingClaims :many
 SELECT tc.id, tc.customer_id, tc.proof_text, tc.proof_images, tc.submitted_at,
-       ct.name AS task_name, ct.requirement, ct.reward
+       ct.name AS task_name, ct.requirement, tc.reward_base
 FROM task_claims tc
 JOIN claim_tasks ct ON ct.id = tc.task_id
 WHERE tc.status = 'submitted' AND tc.id > $1
@@ -272,10 +272,11 @@ type ListPendingClaimsRow struct {
 	SubmittedAt pgtype.Timestamptz
 	TaskName    string
 	Requirement *string
-	Reward      int64
+	RewardBase  int64
 }
 
 // 待审核队列（先进先出，id 升序游标）：附任务要求与凭证供管理员参考。
+// 奖励取领取时快照 reward_base，与审核实际发奖口径一致（定义改 reward 不影响在途）。
 func (q *Queries) ListPendingClaims(ctx context.Context, arg ListPendingClaimsParams) ([]ListPendingClaimsRow, error) {
 	rows, err := q.db.Query(ctx, listPendingClaims, arg.Cursor, arg.RowLimit)
 	if err != nil {
@@ -293,7 +294,7 @@ func (q *Queries) ListPendingClaims(ctx context.Context, arg ListPendingClaimsPa
 			&i.SubmittedAt,
 			&i.TaskName,
 			&i.Requirement,
-			&i.Reward,
+			&i.RewardBase,
 		); err != nil {
 			return nil, err
 		}

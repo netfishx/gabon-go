@@ -23,36 +23,37 @@ func claimNotFound() *apierr.Error {
 
 // Claim 领取限时任务：窗口内 + VIP 门槛 + 一人一次（唯一约束）；
 // reward_base 与 expires_at 领取时快照（后续定义变更不影响本次，除非运营回写）。
-func (s *Service) Claim(ctx context.Context, customerID int64, vipLevel int32, taskID int64) error {
+// 返回领取记录 id，客户据此提交证明。
+func (s *Service) Claim(ctx context.Context, customerID int64, vipLevel int32, taskID int64) (int64, error) {
 	task, err := s.q.GetClaimTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return claimNotFound()
+		return 0, claimNotFound()
 	}
 	if err != nil {
-		return fmt.Errorf("get claim task: %w", err)
+		return 0, fmt.Errorf("get claim task: %w", err)
 	}
 	if !task.Enabled {
-		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
+		return 0, apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
 	}
 	now := time.Now().In(tz.Shanghai)
 	if task.StartsAt.Valid && now.Before(task.StartsAt.Time) ||
 		task.EndsAt.Valid && !now.Before(task.EndsAt.Time) {
-		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskWindowClosed, "task is not within its claim window")
+		return 0, apierr.New(http.StatusConflict, apierr.CodeClaimTaskWindowClosed, "task is not within its claim window")
 	}
 	if task.MinVipLevel > vipLevel {
-		return apierr.New(http.StatusForbidden, apierr.CodeClaimTaskVipRequired, "vip level not high enough")
+		return 0, apierr.New(http.StatusForbidden, apierr.CodeClaimTaskVipRequired, "vip level not high enough")
 	}
-	_, err = s.q.InsertTaskClaim(ctx, db.InsertTaskClaimParams{
+	claim, err := s.q.InsertTaskClaim(ctx, db.InsertTaskClaimParams{
 		CustomerID: customerID, TaskID: taskID,
 		RewardBase: task.Reward, ExpiresAt: task.EndsAt,
 	})
 	if db.UniqueViolationConstraint(err) == "task_claims_customer_task_key" {
-		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskAlreadyClaimed, "already claimed")
+		return 0, apierr.New(http.StatusConflict, apierr.CodeClaimTaskAlreadyClaimed, "already claimed")
 	}
 	if err != nil {
-		return fmt.Errorf("insert claim: %w", err)
+		return 0, fmt.Errorf("insert claim: %w", err)
 	}
-	return nil
+	return claim.ID, nil
 }
 
 // Submit 提交证明：图片归属校验在 api 层（需对象存储）；此处只落库与状态流转。

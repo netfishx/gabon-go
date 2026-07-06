@@ -85,7 +85,7 @@ func (h *Handler) handlePendingClaims(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		out.Items = append(out.Items, pendingClaimItem{
 			ClaimID: it.ID, TaskName: it.TaskName, Requirement: it.Requirement,
-			Reward: it.Reward, ProofText: it.ProofText, ProofImages: it.ProofImages,
+			Reward: it.RewardBase, ProofText: it.ProofText, ProofImages: it.ProofImages,
 		})
 	}
 	apierr.WriteJSON(w, http.StatusOK, out)
