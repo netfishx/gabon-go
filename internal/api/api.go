@@ -7,6 +7,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
+	"github.com/netfishx/gabon-go/internal/signin"
 	"github.com/netfishx/gabon-go/internal/storage"
 	"github.com/netfishx/gabon-go/internal/task"
 	"github.com/netfishx/gabon-go/internal/video"
@@ -21,6 +22,7 @@ type Handler struct {
 	Wallets   *wallet.Service
 	Videos    *video.Service
 	Tasks     *task.Service
+	SignIns   *signin.Service
 	Store     *storage.Store
 	CDNBase   string
 }
@@ -49,6 +51,8 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/team/members", h.handleTeamMembers)
 		r.Get("/team/summary", h.handleTeamSummary)
 		r.Get("/tasks", h.handleTasks)
+		r.Post("/sign-in", h.handleSignIn)
+		r.Get("/sign-in/status", h.handleSignInStatus)
 		r.Get("/claim-tasks", h.handleClaimTaskList)
 		r.Get("/claim-tasks/mine", h.handleMyClaims)
 		r.Get("/claim-tasks/{taskID}", h.handleClaimTaskDetail)

@@ -43,6 +43,8 @@ const (
 
 	CodeAdminForbidden = "ADMIN_FORBIDDEN"
 
+	CodeSignInAlreadyToday = "SIGN_IN_ALREADY_TODAY"
+
 	CodeVideoPathForbidden     = "VIDEO_PATH_FORBIDDEN"
 	CodeVideoObjectMissing     = "VIDEO_OBJECT_MISSING"
 	CodeVideoNotFound          = "VIDEO_NOT_FOUND"
