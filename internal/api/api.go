@@ -11,6 +11,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/storage"
 	"github.com/netfishx/gabon-go/internal/task"
 	"github.com/netfishx/gabon-go/internal/video"
+	"github.com/netfishx/gabon-go/internal/vip"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
@@ -23,6 +24,7 @@ type Handler struct {
 	Videos    *video.Service
 	Tasks     *task.Service
 	SignIns   *signin.Service
+	Vips      *vip.Service
 	Store     *storage.Store
 	CDNBase   string
 }
@@ -53,6 +55,8 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/tasks", h.handleTasks)
 		r.Post("/sign-in", h.handleSignIn)
 		r.Get("/sign-in/status", h.handleSignInStatus)
+		r.Post("/vip/purchase", h.handleVipPurchase)
+		r.Get("/vip/levels", h.handleVipLevels)
 		r.Get("/claim-tasks", h.handleClaimTaskList)
 		r.Get("/claim-tasks/mine", h.handleMyClaims)
 		r.Get("/claim-tasks/{taskID}", h.handleClaimTaskDetail)

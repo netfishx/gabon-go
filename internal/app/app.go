@@ -24,6 +24,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/task"
 	"github.com/netfishx/gabon-go/internal/transcode"
 	"github.com/netfishx/gabon-go/internal/video"
+	"github.com/netfishx/gabon-go/internal/vip"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
@@ -79,6 +80,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	customers := customer.NewService(pool, wallets)
 	tasks := task.NewService(pool, wallets)
 	signIns := signin.NewService(pool, wallets)
+	vips := vip.NewService(pool, wallets)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -94,6 +96,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Videos:    videoSvc,
 		Tasks:     tasks,
 		SignIns:   signIns,
+		Vips:      vips,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}

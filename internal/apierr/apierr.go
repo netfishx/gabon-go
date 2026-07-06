@@ -51,6 +51,9 @@ const (
 	CodeVideoNotReviewable     = "VIDEO_NOT_REVIEWABLE"
 	CodeVideoCommentDailyLimit = "VIDEO_COMMENT_DAILY_LIMIT"
 	CodeVideoCommentNotFound   = "VIDEO_COMMENT_NOT_FOUND"
+	CodeVideoUploadLimit       = "VIDEO_UPLOAD_LIMIT_REACHED"
+
+	CodeVipNotUpgrade = "VIP_NOT_UPGRADE"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。
