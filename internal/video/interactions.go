@@ -37,18 +37,20 @@ func (s *Service) publishedByPublicID(ctx context.Context, publicID string) (*db
 }
 
 // Like 点赞：软删复用行——仅首次 INSERT 计热度（+2），复活只恢复计数，重复点赞幂等。
-func (s *Service) Like(ctx context.Context, customerID int64, publicID string) error {
+// counted 仅首次 INSERT 为 true：任务进度与热度同口径（终身一行只计一次）。
+func (s *Service) Like(ctx context.Context, customerID int64, publicID string) (counted bool, err error) {
 	v, err := s.publishedByPublicID(ctx, publicID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		inserted, err := q.InsertLike(ctx, db.InsertLikeParams{CustomerID: customerID, VideoID: v.ID})
 		if err != nil {
 			return err
 		}
 		if inserted == 1 {
+			counted = true
 			return q.BumpVideoCounters(ctx, bump(v.ID, db.BumpVideoCountersParams{LikeDelta: 1, HotDelta: hotLike}))
 		}
 		revived, err := q.ReviveLike(ctx, db.ReviveLikeParams{CustomerID: customerID, VideoID: v.ID})
@@ -60,6 +62,10 @@ func (s *Service) Like(ctx context.Context, customerID int64, publicID string) e
 		}
 		return nil // 已是点赞状态，幂等
 	})
+	if err != nil {
+		return false, err
+	}
+	return counted, nil
 }
 
 // Unlike 取消点赞：软删，计数 -1，热度不减。
@@ -173,22 +179,24 @@ func (s *Service) Play(ctx context.Context, customerID int64, publicID string) (
 }
 
 // MarkValid 有效播放：同一事件 id 只计一次（条件 UPDATE），重复上报与他人事件均幂等静默。
-func (s *Service) MarkValid(ctx context.Context, customerID, playID int64) error {
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+// marked 仅首次标记为 true，并回传 videoID（任务进度事件源：仅首次推进，防刷主体为视频）。
+func (s *Service) MarkValid(ctx context.Context, customerID, playID int64) (videoID int64, marked bool, err error) {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		videoID, err := q.MarkPlayValid(ctx, db.MarkPlayValidParams{ID: playID, CustomerID: customerID})
+		vid, err := q.MarkPlayValid(ctx, db.MarkPlayValidParams{ID: playID, CustomerID: customerID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // 已标记 / 不存在 / 非本人：幂等静默，不泄露存在性
 		}
 		if err != nil {
 			return err
 		}
-		return q.BumpVideoCounters(ctx, bump(videoID, db.BumpVideoCountersParams{ValidDelta: 1, HotDelta: hotValid}))
+		videoID, marked = vid, true
+		return q.BumpVideoCounters(ctx, bump(vid, db.BumpVideoCountersParams{ValidDelta: 1, HotDelta: hotValid}))
 	})
 	if err != nil {
-		return fmt.Errorf("mark valid play: %w", err)
+		return 0, false, fmt.Errorf("mark valid play: %w", err)
 	}
-	return nil
+	return videoID, marked, nil
 }
 
 func bump(videoID int64, p db.BumpVideoCountersParams) db.BumpVideoCountersParams {

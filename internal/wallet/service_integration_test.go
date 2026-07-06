@@ -43,7 +43,8 @@ func setup(t *testing.T) (*Service, int64) {
 	n := nameSeq.Add(1)
 	username := fmt.Sprintf("w%d_%d", os.Getpid()%10000, n)
 	var id int64
-	if err := testPool.QueryRow(context.Background(),
+	if err := testPool.QueryRow(
+		context.Background(),
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ($1, $2, 'not-a-real-hash', $3) RETURNING id`,
 		fmt.Sprintf("wfix%08d", n), username, fmt.Sprintf("WF%06d", n),

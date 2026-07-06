@@ -19,6 +19,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
 	"github.com/netfishx/gabon-go/internal/storage"
+	"github.com/netfishx/gabon-go/internal/task"
 	"github.com/netfishx/gabon-go/internal/transcode"
 	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/wallet"
@@ -68,6 +69,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 
 	wallets := wallet.NewService(pool)
 	customers := customer.NewService(pool, wallets)
+	tasks := task.NewService(pool, wallets)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -81,6 +83,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Reports:   report.NewService(pool),
 		Wallets:   wallets,
 		Videos:    videoSvc,
+		Tasks:     tasks,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}
