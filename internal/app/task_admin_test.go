@@ -115,6 +115,20 @@ func TestClaimTaskDeadlineExtensionRewritesInflight(t *testing.T) {
 	custToken := loginCustomer(t, username, "secret123")
 	claimID := claimTask(t, custToken, taskID) // 快照 expires_at = 原 ends_at
 
+	// 对照：一个已发奖记录，延期不得回写其 expires_at
+	uDone := uniqueUsername(t)
+	registerCustomer(t, uDone, "")
+	tokDone := loginCustomer(t, uDone, "secret123")
+	doneClaim := claimTask(t, tokDone, taskID)
+	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", doneClaim),
+		map[string]any{"proof_images": []string{uploadProof(t, tokDone)}}, tokDone)
+	postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/approve", doneClaim), nil, adminToken)
+	var doneExpiryBefore time.Time
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM task_claims WHERE id = $1`, doneClaim).Scan(&doneExpiryBefore); err != nil {
+		t.Fatalf("query done expiry: %v", err)
+	}
+
 	// 运营延期 ends_at → 在途未终态记录 expires_at 同步回写
 	newEnd := now.Add(48 * time.Hour)
 	resp, body := doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d", taskID),
@@ -131,6 +145,15 @@ func TestClaimTaskDeadlineExtensionRewritesInflight(t *testing.T) {
 	if expiresAt.Before(now.Add(47 * time.Hour)) {
 		t.Errorf("inflight claim expires_at = %v, want rewritten to ~%v", expiresAt, newEnd)
 	}
+	// 已发奖记录 expires_at 不变
+	var doneExpiryAfter time.Time
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM task_claims WHERE id = $1`, doneClaim).Scan(&doneExpiryAfter); err != nil {
+		t.Fatalf("query done expiry after: %v", err)
+	}
+	if !doneExpiryAfter.Equal(doneExpiryBefore) {
+		t.Errorf("rewarded claim expires_at changed: %v → %v (want unchanged)", doneExpiryBefore, doneExpiryAfter)
+	}
 }
 
 // ---- 运营语义：软删定义作废在途 ----
@@ -140,11 +163,18 @@ func TestClaimTaskSoftDeleteVoidsInflight(t *testing.T) {
 	now := time.Now()
 	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
 
-	// 一个在途 claimed + 一个已 rewarded
+	// 三态：claimed（在途）+ submitted（已提交待审，也算未终态）+ rewarded（终态）
 	uInflight := uniqueUsername(t)
 	registerCustomer(t, uInflight, "")
 	tokInflight := loginCustomer(t, uInflight, "secret123")
 	inflightClaim := claimTask(t, tokInflight, taskID)
+
+	uSub := uniqueUsername(t)
+	registerCustomer(t, uSub, "")
+	tokSub := loginCustomer(t, uSub, "secret123")
+	submittedClaim := claimTask(t, tokSub, taskID)
+	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", submittedClaim),
+		map[string]any{"proof_images": []string{uploadProof(t, tokSub)}}, tokSub)
 
 	uDone := uniqueUsername(t)
 	registerCustomer(t, uDone, "")
@@ -160,8 +190,9 @@ func TestClaimTaskSoftDeleteVoidsInflight(t *testing.T) {
 		t.Fatalf("soft delete: status = %d, body = %v", resp.StatusCode, body)
 	}
 
-	assertClaimStatus(t, inflightClaim, "expired") // 在途未终态作废
-	assertClaimStatus(t, doneClaim, "rewarded")    // 已发奖终态不动
+	assertClaimStatus(t, inflightClaim, "expired")  // 在途 claimed 作废
+	assertClaimStatus(t, submittedClaim, "expired") // 待审核也作废（与过期 cron 豁免 submitted 相反的关键差异）
+	assertClaimStatus(t, doneClaim, "rewarded")     // 已发奖终态不动
 }
 
 // ---- 运营语义：下架冻结流转 ----
@@ -188,6 +219,35 @@ func TestClaimTaskOfflineFreezesFlow(t *testing.T) {
 	}
 }
 
+func TestClaimTaskOfflineFreezesReview(t *testing.T) {
+	// 下架冻结"审核"须同时覆盖通过与驳回（PRD US29：提交/审核/发奖全部冻结）
+	adminToken := loginAdmin(t)
+	now := time.Now()
+	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	custToken := loginCustomer(t, username, "secret123")
+	claimID := claimTask(t, custToken, taskID)
+	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
+		map[string]any{"proof_images": []string{uploadProof(t, custToken)}}, custToken)
+
+	// 下架
+	doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d/status", taskID),
+		adminToken, map[string]any{"enabled": false})
+
+	// 通过与驳回都应被冻结
+	resp, _ := postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/approve", claimID), nil, adminToken)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("approve on offline task: status = %d, want 409", resp.StatusCode)
+	}
+	resp, _ = postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/reject", claimID),
+		map[string]any{"remark": "no"}, adminToken)
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("reject on offline task: status = %d, want 409 (审核冻结须含驳回)", resp.StatusCode)
+	}
+}
+
 // ---- 快照隔离：编辑定义不改已领取奖励基数 ----
 
 func TestClaimTaskEditKeepsClaimRewardSnapshot(t *testing.T) {
@@ -204,7 +264,13 @@ func TestClaimTaskEditKeepsClaimRewardSnapshot(t *testing.T) {
 	doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d", taskID),
 		adminToken, map[string]any{"reward": 999})
 
-	// 审核发奖仍按快照 100
+	// 展示字段实时引用：详情 reward 立即变 999（未领取维度）
+	_, detail := getJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d", taskID), custToken)
+	if got, _ := detail["reward"].(float64); int64(got) != 999 {
+		t.Errorf("detail reward = %v, want 999 (display fields reference current definition)", detail["reward"])
+	}
+
+	// 审核发奖仍按快照 100（奖励基数领取时快照）
 	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
 		map[string]any{"proof_images": []string{uploadProof(t, custToken)}}, custToken)
 	postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/approve", claimID), nil, adminToken)
@@ -226,9 +292,11 @@ func TestTaskAdminRequiresAdminRole(t *testing.T) {
 	}{
 		{http.MethodGet, "/admin/v1/periodic-tasks", nil},
 		{http.MethodPost, "/admin/v1/periodic-tasks", map[string]any{"name": "x", "category": "like", "period": "daily", "target": 1, "reward": 1}},
+		{http.MethodPatch, fmt.Sprintf("/admin/v1/periodic-tasks/%d", taskID), map[string]any{"reward": 2}},
 		{http.MethodGet, "/admin/v1/claim-tasks", nil},
 		{http.MethodPost, "/admin/v1/claim-tasks", map[string]any{"name": "x", "reward": 1}},
 		{http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d", taskID), map[string]any{"reward": 2}},
+		{http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d/status", taskID), map[string]any{"enabled": false}},
 		{http.MethodDelete, fmt.Sprintf("/admin/v1/claim-tasks/%d", taskID), nil},
 	}
 	for _, e := range endpoints {

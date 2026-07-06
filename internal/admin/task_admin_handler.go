@@ -12,6 +12,11 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
+// listResponse 后台无游标列表的统一响应形状。
+type listResponse[T any] struct {
+	Items []T `json:"items"`
+}
+
 func taskIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || id <= 0 {
@@ -67,20 +72,31 @@ func (h *Handler) handleCreatePeriodicTask(w http.ResponseWriter, r *http.Reques
 	apierr.WriteJSON(w, http.StatusCreated, map[string]int64{"id": t.ID})
 }
 
+type periodicTaskAdminItem struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	Period       string `json:"period"`
+	Target       int32  `json:"target"`
+	Reward       int64  `json:"reward"`
+	DisplayOrder int32  `json:"display_order"`
+	Enabled      bool   `json:"enabled"`
+}
+
 func (h *Handler) handleListPeriodicTasks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Tasks.ListPeriodicTasksAdmin(r.Context())
 	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	items := make([]periodicTaskAdminItem, 0, len(rows))
 	for _, t := range rows {
-		items = append(items, map[string]any{
-			"id": t.ID, "name": t.Name, "category": string(t.Category), "period": string(t.Period),
-			"target": t.Target, "reward": t.Reward, "display_order": t.DisplayOrder, "enabled": t.Enabled,
+		items = append(items, periodicTaskAdminItem{
+			ID: t.ID, Name: t.Name, Category: string(t.Category), Period: string(t.Period),
+			Target: t.Target, Reward: t.Reward, DisplayOrder: t.DisplayOrder, Enabled: t.Enabled,
 		})
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	apierr.WriteJSON(w, http.StatusOK, listResponse[periodicTaskAdminItem]{Items: items})
 }
 
 type updatePeriodicTaskRequest struct {
@@ -160,20 +176,29 @@ func (h *Handler) handleCreateClaimTask(w http.ResponseWriter, r *http.Request) 
 	apierr.WriteJSON(w, http.StatusCreated, map[string]int64{"id": t.ID})
 }
 
+type claimTaskAdminItem struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	MinVipLevel  int32  `json:"min_vip_level"`
+	Reward       int64  `json:"reward"`
+	DisplayOrder int32  `json:"display_order"`
+	Enabled      bool   `json:"enabled"`
+}
+
 func (h *Handler) handleListClaimTasks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Tasks.ListClaimTasksAdmin(r.Context())
 	if err != nil {
 		apierr.Write(w, err)
 		return
 	}
-	items := make([]map[string]any, 0, len(rows))
+	items := make([]claimTaskAdminItem, 0, len(rows))
 	for _, t := range rows {
-		items = append(items, map[string]any{
-			"id": t.ID, "name": t.Name, "min_vip_level": t.MinVipLevel,
-			"reward": t.Reward, "display_order": t.DisplayOrder, "enabled": t.Enabled,
+		items = append(items, claimTaskAdminItem{
+			ID: t.ID, Name: t.Name, MinVipLevel: t.MinVipLevel,
+			Reward: t.Reward, DisplayOrder: t.DisplayOrder, Enabled: t.Enabled,
 		})
 	}
-	apierr.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+	apierr.WriteJSON(w, http.StatusOK, listResponse[claimTaskAdminItem]{Items: items})
 }
 
 type updateClaimTaskRequest struct {

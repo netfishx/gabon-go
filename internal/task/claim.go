@@ -22,14 +22,17 @@ func claimNotFound() *apierr.Error {
 	return apierr.New(http.StatusNotFound, apierr.CodeClaimTaskNotFound, "claim task not found")
 }
 
-// assertTaskOnline 下架/软删任务冻结流转（提交/审核/发奖）。
+// assertTaskOnline 下架/软删任务冻结流转（提交/审核=通过与驳回/发奖）。
 func (s *Service) assertTaskOnline(ctx context.Context, taskID int64) error {
 	task, err := s.q.GetClaimTask(ctx, taskID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !task.Enabled) {
-		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline") // 软删即下架
 	}
 	if err != nil {
 		return fmt.Errorf("assert task online: %w", err)
+	}
+	if !task.Enabled {
+		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
 	}
 	return nil
 }
@@ -156,10 +159,20 @@ func (s *Service) Approve(ctx context.Context, adminID, claimID int64) error {
 	})
 }
 
-// Reject 驳回：理由必填；submitted→rejected。
+// Reject 驳回：理由必填；submitted→rejected。下架任务冻结驳回（与通过对称，PRD 审核冻结）。
 func (s *Service) Reject(ctx context.Context, adminID, claimID int64, remark string) error {
 	if remark == "" {
 		return apierr.InvalidArgument("reject remark is required")
+	}
+	claim, err := s.q.GetTaskClaim(ctx, claimID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return claimNotFound()
+	}
+	if err != nil {
+		return fmt.Errorf("get claim: %w", err)
+	}
+	if err := s.assertTaskOnline(ctx, claim.TaskID); err != nil {
+		return err
 	}
 	rows, err := s.q.RejectTaskClaim(ctx, db.RejectTaskClaimParams{
 		ID: claimID, ReviewedBy: &adminID, ReviewRemark: &remark,
