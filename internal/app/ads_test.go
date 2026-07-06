@@ -246,6 +246,36 @@ func TestAdvertiserAndAdCRUD(t *testing.T) {
 	}
 }
 
+func TestUpdateAdClearExpiry(t *testing.T) {
+	// 已设过期的广告可经 clear_expires_at 改回永不过期（NULL）
+	adminToken := loginAdmin(t)
+	adv := stageAdvertiser(t, "active")
+	adID := stageAd(t, adv, "active", 10, time.Now().Add(time.Hour)) // 已设过期
+
+	resp, _ := doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/ads/%d", adID),
+		adminToken, map[string]any{"clear_expires_at": true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clear expiry: status = %d", resp.StatusCode)
+	}
+	var expiresAt *time.Time
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM ads WHERE id = $1`, adID).Scan(&expiresAt); err != nil {
+		t.Fatalf("query expires_at: %v", err)
+	}
+	if expiresAt != nil {
+		t.Errorf("expires_at after clear = %v, want NULL", expiresAt)
+	}
+
+	// 反向确认：不带 clear、也不带 expires_at 的更新不动过期字段
+	adID2 := stageAd(t, adv, "active", 10, time.Now().Add(2*time.Hour))
+	doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/ads/%d", adID2), adminToken, map[string]any{"title": "改名"})
+	var exp2 *time.Time
+	testPool.QueryRow(context.Background(), `SELECT expires_at FROM ads WHERE id = $1`, adID2).Scan(&exp2)
+	if exp2 == nil {
+		t.Errorf("expires_at wrongly cleared by unrelated update")
+	}
+}
+
 func TestCreateAdUnknownAdvertiser(t *testing.T) {
 	adminToken := loginAdmin(t)
 	resp, body := postJSON(t, "/admin/v1/ads", map[string]any{

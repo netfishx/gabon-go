@@ -285,25 +285,29 @@ UPDATE ads
 SET title = COALESCE($1, title),
     media_path = COALESCE($2, media_path),
     link = COALESCE($3, link),
-    expires_at = COALESCE($4, expires_at),
+    expires_at = CASE WHEN $4::bool THEN NULL
+                      ELSE COALESCE($5, expires_at) END,
     updated_at = now()
-WHERE id = $5 AND deleted_at IS NULL
+WHERE id = $6 AND deleted_at IS NULL
 RETURNING id, advertiser_id, title, media_path, link, stock_total, stock_remaining, status, deleted_at, created_at, updated_at, expires_at
 `
 
 type UpdateAdParams struct {
-	Title     *string
-	MediaPath *string
-	Link      *string
-	ExpiresAt pgtype.Timestamptz
-	ID        int64
+	Title          *string
+	MediaPath      *string
+	Link           *string
+	ClearExpiresAt bool
+	ExpiresAt      pgtype.Timestamptz
+	ID             int64
 }
 
+// expires_at 三态：clear=true 置 NULL（改回永不过期）；否则有值则更新、无值则保留。
 func (q *Queries) UpdateAd(ctx context.Context, arg UpdateAdParams) (Ad, error) {
 	row := q.db.QueryRow(ctx, updateAd,
 		arg.Title,
 		arg.MediaPath,
 		arg.Link,
+		arg.ClearExpiresAt,
 		arg.ExpiresAt,
 		arg.ID,
 	)

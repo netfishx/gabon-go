@@ -149,10 +149,11 @@ func (h *Handler) handleListAds(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateAdRequest struct {
-	Title     *string `json:"title"`
-	MediaPath *string `json:"media_path"`
-	Link      *string `json:"link"`
-	ExpiresAt *string `json:"expires_at"`
+	Title          *string `json:"title"`
+	MediaPath      *string `json:"media_path"`
+	Link           *string `json:"link"`
+	ExpiresAt      *string `json:"expires_at"`
+	ClearExpiresAt bool    `json:"clear_expires_at"` // true = 改回永不过期（NULL）
 }
 
 func (h *Handler) handleUpdateAd(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +171,8 @@ func (h *Handler) handleUpdateAd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.Ads.UpdateAd(r.Context(), db.UpdateAdParams{
-		ID: id, Title: req.Title, MediaPath: req.MediaPath, Link: req.Link, ExpiresAt: expiresAt,
+		ID: id, Title: req.Title, MediaPath: req.MediaPath, Link: req.Link,
+		ExpiresAt: expiresAt, ClearExpiresAt: req.ClearExpiresAt,
 	}); err != nil {
 		apierr.Write(w, err)
 		return

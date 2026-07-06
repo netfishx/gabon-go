@@ -55,11 +55,13 @@ RETURNING *;
 SELECT * FROM ads WHERE deleted_at IS NULL ORDER BY id;
 
 -- name: UpdateAd :one
+-- expires_at 三态：clear=true 置 NULL（改回永不过期）；否则有值则更新、无值则保留。
 UPDATE ads
 SET title = COALESCE(sqlc.narg('title'), title),
     media_path = COALESCE(sqlc.narg('media_path'), media_path),
     link = COALESCE(sqlc.narg('link'), link),
-    expires_at = COALESCE(sqlc.narg('expires_at'), expires_at),
+    expires_at = CASE WHEN sqlc.arg('clear_expires_at')::bool THEN NULL
+                      ELSE COALESCE(sqlc.narg('expires_at'), expires_at) END,
     updated_at = now()
 WHERE id = sqlc.arg('id') AND deleted_at IS NULL
 RETURNING *;
