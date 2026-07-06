@@ -114,6 +114,37 @@ func (q *Queries) InsertSignIn(ctx context.Context, arg InsertSignInParams) (Sig
 	return i, err
 }
 
+const lockCustomerForSignIn = `-- name: LockCustomerForSignIn :one
+SELECT v.reward_multiplier_bp FROM customers c
+JOIN vip_level_configs v ON v.level = c.vip_level
+WHERE c.id = $1
+FOR NO KEY UPDATE OF c
+`
+
+// 签到事务开头锁客户行并取 VIP 倍率：串行化同一客户的签到事务，
+// 保证相邻日跨午夜并发时 CountSignInsInMonth 读到一致视图（PR #58 review P2）。
+// FOR NO KEY UPDATE OF c 只锁 customers 行，不与注册插入的 FK KEY SHARE 冲突。
+func (q *Queries) LockCustomerForSignIn(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, lockCustomerForSignIn, id)
+	var reward_multiplier_bp int32
+	err := row.Scan(&reward_multiplier_bp)
+	return reward_multiplier_bp, err
+}
+
+const nextMilestoneThreshold = `-- name: NextMilestoneThreshold :one
+SELECT threshold FROM activity_reward_configs
+WHERE kind = 'milestone' AND enabled AND threshold > $1
+ORDER BY threshold
+LIMIT 1
+`
+
+// 大于当前累计天数的最近里程碑档位（供状态端点显示"还差几天"）；无更高档位返回 ErrNoRows。
+func (q *Queries) NextMilestoneThreshold(ctx context.Context, threshold int32) (int32, error) {
+	row := q.db.QueryRow(ctx, nextMilestoneThreshold, threshold)
+	err := row.Scan(&threshold)
+	return threshold, err
+}
+
 const todaySigned = `-- name: TodaySigned :one
 SELECT EXISTS (SELECT 1 FROM sign_ins WHERE customer_id = $1 AND sign_date = $2)::bool
 `

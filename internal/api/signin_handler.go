@@ -15,8 +15,9 @@ func (h *Handler) handleSignIn(w http.ResponseWriter, r *http.Request) {
 }
 
 type signInStatusResponse struct {
-	SignedDays  int64 `json:"signed_days"`
-	TodaySigned bool  `json:"today_signed"`
+	SignedDays    int64  `json:"signed_days"`
+	TodaySigned   bool   `json:"today_signed"`
+	NextMilestone *int32 `json:"next_milestone"` // 下一里程碑档位（null = 无更高档位）
 }
 
 func (h *Handler) handleSignInStatus(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +27,6 @@ func (h *Handler) handleSignInStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apierr.WriteJSON(w, http.StatusOK, signInStatusResponse{
-		SignedDays: st.SignedDays, TodaySigned: st.TodaySigned,
+		SignedDays: st.SignedDays, TodaySigned: st.TodaySigned, NextMilestone: st.NextMilestone,
 	})
 }

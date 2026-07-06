@@ -27,3 +27,19 @@ WHERE kind = 'milestone' AND threshold = $1 AND enabled;
 INSERT INTO milestone_awards (customer_id, month, threshold, reward_amount)
 VALUES ($1, sqlc.arg('month')::date, sqlc.arg('threshold'), sqlc.arg('reward_amount'))
 RETURNING *;
+
+-- name: NextMilestoneThreshold :one
+-- 大于当前累计天数的最近里程碑档位（供状态端点显示"还差几天"）；无更高档位返回 ErrNoRows。
+SELECT threshold FROM activity_reward_configs
+WHERE kind = 'milestone' AND enabled AND threshold > $1
+ORDER BY threshold
+LIMIT 1;
+
+-- name: LockCustomerForSignIn :one
+-- 签到事务开头锁客户行并取 VIP 倍率：串行化同一客户的签到事务，
+-- 保证相邻日跨午夜并发时 CountSignInsInMonth 读到一致视图（PR #58 review P2）。
+-- FOR NO KEY UPDATE OF c 只锁 customers 行，不与注册插入的 FK KEY SHARE 冲突。
+SELECT v.reward_multiplier_bp FROM customers c
+JOIN vip_level_configs v ON v.level = c.vip_level
+WHERE c.id = $1
+FOR NO KEY UPDATE OF c;

@@ -82,6 +82,47 @@ func TestSignInStatus(t *testing.T) {
 	}
 }
 
+func TestSignInStatusNextMilestone(t *testing.T) {
+	// 配置 7 天里程碑：首签后状态应显示下一里程碑 = 7
+	setMilestoneConfig(t, 7, 50)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM activity_reward_configs WHERE kind = 'milestone' AND threshold = 7`)
+	})
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+
+	postJSON(t, "/api/v1/sign-in", nil, token)
+	st := signInStatus(t, token)
+	if got, _ := st["next_milestone"].(float64); int(got) != 7 {
+		t.Errorf("next_milestone = %v, want 7", st["next_milestone"])
+	}
+}
+
+func TestSignInRewardFloorWithVip(t *testing.T) {
+	// 日签 base=3、铜牌 12000bp → floor(3×1.2)=floor(3.6)=3（验证各自 floor 截断，非恒等）
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx,
+		`UPDATE activity_reward_configs SET reward = 3 WHERE kind = 'daily' AND threshold = 0`); err != nil {
+		t.Fatalf("bump daily reward: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `UPDATE activity_reward_configs SET reward = 1 WHERE kind = 'daily' AND threshold = 0`)
+	})
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	cid := customerIDOf(t, username)
+	if _, err := testPool.Exec(ctx, `UPDATE customers SET vip_level = 1 WHERE id = $1`, cid); err != nil {
+		t.Fatalf("set vip: %v", err)
+	}
+
+	postJSON(t, "/api/v1/sign-in", nil, token)
+	if got := availableOf(t, token); got != 3 {
+		t.Errorf("available = %d, want 3 (floor(3×1.2))", got)
+	}
+}
+
 func TestSignInMilestoneReward(t *testing.T) {
 	// 里程碑档位 = 1 天（首签即命中），额外发 50 钻；日签 1 → 共 51
 	setMilestoneConfig(t, 1, 50)

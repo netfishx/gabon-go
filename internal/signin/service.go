@@ -35,19 +35,26 @@ func pgDate(t time.Time) pgtype.Date {
 	return pgtype.Date{Time: t, Valid: true}
 }
 
-// SignIn 每日打卡：唯一约束防重签；日签与里程碑各自 floor 放大、各自入账（拆两类流水）。
-// 达标发奖与签到落库同一事务原子完成。
+// SignIn 每日打卡（签到日 = 当前 Asia/Shanghai 日期）。
 func (s *Service) SignIn(ctx context.Context, customerID int64) error {
 	now := time.Now().In(tz.Shanghai)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, tz.Shanghai)
-	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, tz.Shanghai)
+	return s.signInAt(ctx, customerID, today)
+}
+
+// signInAt 在指定签到日打卡：唯一约束防重签；日签与里程碑各自 floor 放大、各自入账（拆两类流水）。
+// 签到落库 + 达标发奖同一事务原子完成；开头锁客户行串行化同一客户的签到（跨午夜相邻日安全）。
+// day 参数化便于确定性测试相邻日；生产入口 SignIn 传当日。
+func (s *Service) signInAt(ctx context.Context, customerID int64, today time.Time) error {
+	monthStart := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, tz.Shanghai)
 
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 
-		bp, err := q.GetCustomerRewardMultiplierBp(ctx, customerID)
+		// 锁客户行串行化同一客户的签到事务：保证相邻日跨午夜并发时月累计计数视图一致
+		bp, err := q.LockCustomerForSignIn(ctx, customerID)
 		if err != nil {
-			return fmt.Errorf("read multiplier: %w", err)
+			return fmt.Errorf("lock customer: %w", err)
 		}
 
 		// 日签奖励（缺配置/停用则不发）
@@ -101,12 +108,11 @@ func (s *Service) grantMilestone(ctx context.Context, q *db.Queries, tx pgx.Tx, 
 	if amount <= 0 {
 		return nil
 	}
+	// 同月同档只发一次由唯一约束保证；客户行锁已串行化本客户签到，正常流不可能撞约束，
+	// 若真撞（数据异常）则原样上抛令事务整体回滚，不吞。
 	award, err := q.InsertMilestoneAward(ctx, db.InsertMilestoneAwardParams{
 		CustomerID: customerID, Month: pgDate(monthStart), Threshold: threshold, RewardAmount: amount,
 	})
-	if db.UniqueViolationConstraint(err) == "milestone_awards_key" {
-		return nil // 同月同档已发，幂等
-	}
 	if err != nil {
 		return fmt.Errorf("insert milestone award: %w", err)
 	}
@@ -128,10 +134,11 @@ func rewardAmount(bp int32, get func() (int64, error)) (int64, error) {
 	return base * int64(bp) / 10000, nil
 }
 
-// Status 本月签到状态：已签天数、今日是否已签、下一里程碑进度由 handler 组装。
+// Status 本月签到状态：已签天数、今日是否已签、下一里程碑档位（nil = 无更高档位）。
 type Status struct {
-	SignedDays  int64
-	TodaySigned bool
+	SignedDays    int64
+	TodaySigned   bool
+	NextMilestone *int32 // 大于当前已签天数的最近里程碑档位
 }
 
 // Status 查询本月签到状态。
@@ -148,5 +155,14 @@ func (s *Service) Status(ctx context.Context, customerID int64) (Status, error) 
 	if err != nil {
 		return Status{}, fmt.Errorf("today signed: %w", err)
 	}
-	return Status{SignedDays: days, TodaySigned: signed}, nil
+	st := Status{SignedDays: days, TodaySigned: signed}
+	next, err := s.q.NextMilestoneThreshold(ctx, int32(days)) //nolint:gosec // 自然月签到天数 ≤31
+	if errors.Is(err, pgx.ErrNoRows) {
+		return st, nil // 无更高里程碑档位
+	}
+	if err != nil {
+		return Status{}, fmt.Errorf("next milestone: %w", err)
+	}
+	st.NextMilestone = &next
+	return st, nil
 }
