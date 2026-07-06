@@ -392,7 +392,8 @@ func (q *Queries) RejectTaskClaim(ctx context.Context, arg RejectTaskClaimParams
 const submitTaskClaim = `-- name: SubmitTaskClaim :execrows
 UPDATE task_claims
 SET status = 'submitted', proof_text = $1,
-    proof_images = $2, submitted_at = now(), updated_at = now()
+    proof_images = $2, submitted_at = now(),
+    reviewed_by = NULL, reviewed_at = NULL, review_remark = NULL, updated_at = now()
 WHERE id = $3 AND customer_id = $4
   AND status IN ('claimed', 'rejected')
 `
@@ -404,7 +405,7 @@ type SubmitTaskClaimParams struct {
 	CustomerID  int64
 }
 
-// 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted）。
+// 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted，清空上轮驳回痕迹）。
 func (q *Queries) SubmitTaskClaim(ctx context.Context, arg SubmitTaskClaimParams) (int64, error) {
 	result, err := q.db.Exec(ctx, submitTaskClaim,
 		arg.ProofText,

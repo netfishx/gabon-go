@@ -23,7 +23,7 @@ func claimNotFound() *apierr.Error {
 
 // Claim 领取限时任务：窗口内 + VIP 门槛 + 一人一次（唯一约束）；
 // reward_base 与 expires_at 领取时快照（后续定义变更不影响本次，除非运营回写）。
-func (s *Service) Claim(ctx context.Context, customerID, vipLevel int, taskID int64) error {
+func (s *Service) Claim(ctx context.Context, customerID int64, vipLevel int32, taskID int64) error {
 	task, err := s.q.GetClaimTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return claimNotFound()
@@ -39,11 +39,11 @@ func (s *Service) Claim(ctx context.Context, customerID, vipLevel int, taskID in
 		task.EndsAt.Valid && !now.Before(task.EndsAt.Time) {
 		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskWindowClosed, "task is not within its claim window")
 	}
-	if int(task.MinVipLevel) > vipLevel {
+	if task.MinVipLevel > vipLevel {
 		return apierr.New(http.StatusForbidden, apierr.CodeClaimTaskVipRequired, "vip level not high enough")
 	}
 	_, err = s.q.InsertTaskClaim(ctx, db.InsertTaskClaimParams{
-		CustomerID: int64(customerID), TaskID: taskID,
+		CustomerID: customerID, TaskID: taskID,
 		RewardBase: task.Reward, ExpiresAt: task.EndsAt,
 	})
 	if db.UniqueViolationConstraint(err) == "task_claims_customer_task_key" {
@@ -55,8 +55,9 @@ func (s *Service) Claim(ctx context.Context, customerID, vipLevel int, taskID in
 	return nil
 }
 
-// Submit 提交证明：校验后归属校验交由 api 层（需对象存储）；此处只落库与状态流转。
-// claimed/rejected 可提交（驳回重提覆盖凭证回 submitted）；下架/过期即时拦截。
+// Submit 提交证明：图片归属校验在 api 层（需对象存储）；此处只落库与状态流转。
+// claimed/rejected 可提交（驳回重提覆盖凭证回 submitted）；过期即时拦截。
+// 下架冻结属运营语义（#49），本片不校验任务 enabled。
 func (s *Service) Submit(ctx context.Context, customerID, claimID int64, proofText *string, images []string) error {
 	if len(images) < 1 || len(images) > maxProofImages {
 		return apierr.InvalidArgument("proof must have 1-9 images")

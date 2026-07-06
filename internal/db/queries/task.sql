@@ -52,10 +52,11 @@ RETURNING *;
 SELECT * FROM task_claims WHERE id = $1;
 
 -- name: SubmitTaskClaim :execrows
--- 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted）。
+-- 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted，清空上轮驳回痕迹）。
 UPDATE task_claims
 SET status = 'submitted', proof_text = sqlc.narg('proof_text'),
-    proof_images = sqlc.arg('proof_images'), submitted_at = now(), updated_at = now()
+    proof_images = sqlc.arg('proof_images'), submitted_at = now(),
+    reviewed_by = NULL, reviewed_at = NULL, review_remark = NULL, updated_at = now()
 WHERE id = sqlc.arg('id') AND customer_id = sqlc.arg('customer_id')
   AND status IN ('claimed', 'rejected');
 

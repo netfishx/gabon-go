@@ -197,6 +197,7 @@ func TestClaimTaskProofGuards(t *testing.T) {
 	}{
 		{"empty", []string{}, http.StatusBadRequest},
 		{"foreign_prefix", []string{foreignProof}, http.StatusForbidden},
+		{"missing_object", []string{fmt.Sprintf("proofs/%d/nonexistent.png", customerIDOf(t, username))}, http.StatusBadRequest},
 		{"too_many", func() []string {
 			out := make([]string, 10)
 			for i := range out {
@@ -214,6 +215,71 @@ func TestClaimTaskProofGuards(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestClaimTaskSubmittedNotResubmittable(t *testing.T) {
+	now := time.Now()
+	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+	claimID := claimIDOf(t, username, taskID)
+
+	if resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
+		map[string]any{"proof_images": []string{uploadProof(t, token)}}, token); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("first submit failed")
+	}
+	// 已 submitted：不可再提交（须等审核结果）
+	resp, body := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
+		map[string]any{"proof_images": []string{uploadProof(t, token)}}, token)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("resubmit while submitted: status = %d, want 409, body = %v", resp.StatusCode, body)
+	}
+	if got := body["code"]; got != "CLAIM_TASK_NOT_SUBMITTABLE" {
+		t.Errorf("code = %v, want CLAIM_TASK_NOT_SUBMITTABLE", got)
+	}
+}
+
+func TestClaimTaskNoReclaimAfterRejectOrExpire(t *testing.T) {
+	now := time.Now()
+	adminToken := loginAdmin(t)
+
+	t.Run("after_reject", func(t *testing.T) {
+		taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+		username := uniqueUsername(t)
+		registerCustomer(t, username, "")
+		token := loginCustomer(t, username, "secret123")
+		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+		claimID := claimIDOf(t, username, taskID)
+		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/claims/%d/submit", claimID),
+			map[string]any{"proof_images": []string{uploadProof(t, token)}}, token)
+		postJSON(t, fmt.Sprintf("/admin/v1/claim-tasks/claims/%d/reject", claimID),
+			map[string]any{"remark": "no"}, adminToken)
+		// 驳回后再领同一任务：唯一约束挡住
+		resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("reclaim after reject: status = %d, want 409", resp.StatusCode)
+		}
+	})
+
+	t.Run("after_expire", func(t *testing.T) {
+		taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+		username := uniqueUsername(t)
+		registerCustomer(t, username, "")
+		token := loginCustomer(t, username, "secret123")
+		postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+		claimID := claimIDOf(t, username, taskID)
+		// 直接把领取记录翻到 expired（过期 cron 属 #48，这里只验"过期后不可重领"）
+		if _, err := testPool.Exec(context.Background(),
+			`UPDATE task_claims SET status = 'expired' WHERE id = $1`, claimID); err != nil {
+			t.Fatalf("expire claim: %v", err)
+		}
+		resp, _ := postJSON(t, fmt.Sprintf("/api/v1/claim-tasks/%d/claim", taskID), nil, token)
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("reclaim after expire: status = %d, want 409", resp.StatusCode)
+		}
+	})
 }
 
 func TestClaimTaskRejectAndResubmit(t *testing.T) {

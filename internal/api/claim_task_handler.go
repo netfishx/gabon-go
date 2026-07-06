@@ -1,17 +1,16 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
 )
 
-func claimIDParam(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
+// positiveIDParam 解析路径中的正整数 id 参数。
+func positiveIDParam(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
 	id, err := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	if err != nil || id <= 0 {
 		apierr.Write(w, apierr.InvalidArgument("malformed id"))
@@ -21,12 +20,12 @@ func claimIDParam(w http.ResponseWriter, r *http.Request, name string) (int64, b
 }
 
 func (h *Handler) handleClaimTaskClaim(w http.ResponseWriter, r *http.Request) {
-	taskID, ok := claimIDParam(w, r, "taskID")
+	taskID, ok := positiveIDParam(w, r, "taskID")
 	if !ok {
 		return
 	}
 	c := customerFrom(r.Context())
-	if err := h.Tasks.Claim(r.Context(), int(c.ID), int(c.VipLevel), taskID); err != nil {
+	if err := h.Tasks.Claim(r.Context(), c.ID, c.VipLevel, taskID); err != nil {
 		apierr.Write(w, err)
 		return
 	}
@@ -39,7 +38,7 @@ type submitProofRequest struct {
 }
 
 func (h *Handler) handleClaimTaskSubmit(w http.ResponseWriter, r *http.Request) {
-	claimID, ok := claimIDParam(w, r, "claimID")
+	claimID, ok := positiveIDParam(w, r, "claimID")
 	if !ok {
 		return
 	}
@@ -50,7 +49,7 @@ func (h *Handler) handleClaimTaskSubmit(w http.ResponseWriter, r *http.Request) 
 	c := customerFrom(r.Context())
 	// 凭证归属校验：本人 proofs 前缀 + 白名单扩展名 + 对象存在（复用 L 上传三重校验）
 	for _, img := range req.ProofImages {
-		if err := h.validateProofPath(r, c.ID, img); err != nil {
+		if err := h.validateImagePath(r, c.ID, imageKinds["proof"], img); err != nil {
 			apierr.Write(w, err)
 			return
 		}
@@ -60,23 +59,4 @@ func (h *Handler) handleClaimTaskSubmit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// validateProofPath 任务证明消费校验：与头像同款三重校验，前缀为 proofs/{本人id}/。
-func (h *Handler) validateProofPath(r *http.Request, customerID int64, path string) error {
-	if !strings.HasPrefix(path, fmt.Sprintf("proofs/%d/", customerID)) {
-		return apierr.New(http.StatusForbidden, apierr.CodeUploadPathForbidden, "proof path does not belong to you")
-	}
-	dot := strings.LastIndex(path, ".")
-	if dot < 0 || !imageExts[path[dot+1:]] {
-		return apierr.InvalidArgument("proof path has unsupported ext")
-	}
-	exists, err := h.Store.Exists(r.Context(), path)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return apierr.New(http.StatusBadRequest, apierr.CodeUploadObjectMissing, "proof object not found")
-	}
-	return nil
 }
