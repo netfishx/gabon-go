@@ -93,6 +93,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Admins: admin.NewService(pool),
 		Tokens: tokens,
 		Videos: videoSvc,
+		Tasks:  tasks,
 	}
 	r.Mount("/admin/v1", adminHandler.Routes())
 

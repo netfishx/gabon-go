@@ -10,6 +10,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/db"
+	"github.com/netfishx/gabon-go/internal/task"
 	"github.com/netfishx/gabon-go/internal/video"
 )
 
@@ -18,6 +19,7 @@ type Handler struct {
 	Admins *Service
 	Tokens *auth.TokenIssuer
 	Videos *video.Service
+	Tasks  *task.Service
 }
 
 // Routes 组装后台面路由。
@@ -31,8 +33,29 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/videos/pending", h.handlePendingVideos)
 		r.Post("/videos/{publicID}/approve", h.handleApproveVideo)
 		r.Post("/videos/{publicID}/reject", h.handleRejectVideo)
+
+		// 敏感操作仅 ADMIN（checklist M）：任务审核挂角色门禁
+		r.Group(func(r chi.Router) {
+			r.Use(requireRole(db.AdminRoleAdmin))
+			r.Get("/claim-tasks/reviews", h.handlePendingClaims)
+			r.Post("/claim-tasks/claims/{claimID}/approve", h.handleApproveClaim)
+			r.Post("/claim-tasks/claims/{claimID}/reject", h.handleRejectClaim)
+		})
 	})
 	return r
+}
+
+// requireRole 角色门禁：置于 requireAdmin 之后，主体已注入 context。
+func requireRole(role db.AdminRole) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if adminFrom(r.Context()).Role != role {
+				apierr.Write(w, apierr.New(http.StatusForbidden, apierr.CodeAdminForbidden, "insufficient admin role"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 type ctxKey int
