@@ -309,6 +309,56 @@ func TestTaskAdminRequiresAdminRole(t *testing.T) {
 	}
 }
 
+func TestClaimTaskAdminInputValidation(t *testing.T) {
+	adminToken := loginAdmin(t)
+	now := time.Now()
+	taskID := stageClaimTask(t, 100, 0, now.Add(-time.Hour), now.Add(time.Hour))
+
+	t.Run("toggle_missing_enabled", func(t *testing.T) {
+		// {} 不得静默把任务下架——enabled 缺失应 400（破坏性 toggle 须显式）
+		resp, body := doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d/status", taskID),
+			adminToken, map[string]any{})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("toggle with no enabled: status = %d, want 400, body = %v", resp.StatusCode, body)
+		}
+		// 任务仍上架
+		var enabled bool
+		if err := testPool.QueryRow(context.Background(),
+			`SELECT enabled FROM claim_tasks WHERE id = $1`, taskID).Scan(&enabled); err != nil {
+			t.Fatalf("query enabled: %v", err)
+		}
+		if !enabled {
+			t.Errorf("task was taken offline by an empty toggle request")
+		}
+	})
+
+	t.Run("create_negative_vip", func(t *testing.T) {
+		resp, body := postJSON(t, "/admin/v1/claim-tasks", map[string]any{
+			"name": "坏档", "reward": 100, "min_vip_level": -1,
+		}, adminToken)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("create with min_vip_level=-1: status = %d, want 400, body = %v", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("create_vip_out_of_range", func(t *testing.T) {
+		resp, _ := postJSON(t, "/admin/v1/claim-tasks", map[string]any{
+			"name": "坏档", "reward": 100, "min_vip_level": 9,
+		}, adminToken)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("create with min_vip_level=9: status = %d, want 400", resp.StatusCode)
+		}
+	})
+
+	t.Run("update_negative_vip", func(t *testing.T) {
+		resp, _ := doJSON(t, http.MethodPatch, fmt.Sprintf("/admin/v1/claim-tasks/%d", taskID),
+			adminToken, map[string]any{"min_vip_level": -1})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("update with min_vip_level=-1: status = %d, want 400", resp.StatusCode)
+		}
+	})
+}
+
 // adminListContainsID 检查 admin/客户列表响应含指定 id。
 func adminListContainsID(body map[string]any, id int64) bool {
 	items, _ := body["items"].([]any)

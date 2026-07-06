@@ -12,9 +12,17 @@ import (
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
+// maxVipLevel VIP 档位上限（vip_level_configs level 0–3）；min_vip_level 门槛须落此范围。
+const maxVipLevel = 3
+
 // listResponse 后台无游标列表的统一响应形状。
 type listResponse[T any] struct {
 	Items []T `json:"items"`
+}
+
+// validVipLevel 校验 VIP 门槛在 [0, maxVipLevel]。
+func validVipLevel(level int32) bool {
+	return level >= 0 && level <= maxVipLevel
 }
 
 func taskIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -153,6 +161,10 @@ func (h *Handler) handleCreateClaimTask(w http.ResponseWriter, r *http.Request) 
 		apierr.Write(w, apierr.InvalidArgument("name and non-negative reward are required"))
 		return
 	}
+	if !validVipLevel(req.MinVipLevel) {
+		apierr.Write(w, apierr.InvalidArgument("min_vip_level must be between 0 and 3"))
+		return
+	}
 	startsAt, err := tsFromRFC3339(req.StartsAt)
 	if err != nil {
 		apierr.Write(w, apierr.InvalidArgument("starts_at must be RFC3339"))
@@ -224,6 +236,10 @@ func (h *Handler) handleUpdateClaimTask(w http.ResponseWriter, r *http.Request) 
 	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
+	if req.MinVipLevel != nil && !validVipLevel(*req.MinVipLevel) {
+		apierr.Write(w, apierr.InvalidArgument("min_vip_level must be between 0 and 3"))
+		return
+	}
 	startsAt, err := tsFromRFC3339(req.StartsAt)
 	if err != nil {
 		apierr.Write(w, apierr.InvalidArgument("starts_at must be RFC3339"))
@@ -247,7 +263,7 @@ func (h *Handler) handleUpdateClaimTask(w http.ResponseWriter, r *http.Request) 
 }
 
 type toggleStatusRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled"`
 }
 
 func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +275,12 @@ func (h *Handler) handleToggleClaimTaskStatus(w http.ResponseWriter, r *http.Req
 	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
-	if err := h.Tasks.SetClaimTaskEnabled(r.Context(), id, req.Enabled); err != nil {
+	// 破坏性 toggle：enabled 缺失（{} 或拼错字段）不得静默下架
+	if req.Enabled == nil {
+		apierr.Write(w, apierr.InvalidArgument("enabled is required"))
+		return
+	}
+	if err := h.Tasks.SetClaimTaskEnabled(r.Context(), id, *req.Enabled); err != nil {
 		apierr.Write(w, err)
 		return
 	}
