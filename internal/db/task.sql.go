@@ -149,7 +149,9 @@ WHERE expires_at IS NOT NULL AND expires_at < now()
   AND status IN ('claimed', 'rejected')
 `
 
-// 过期作废 {claimed, rejected}：待审核与已发奖豁免（cron 每 5 分钟）。
+// 时间过期作废 {claimed, rejected}：submitted 豁免（用户已尽义务，积压属运营问题）、rewarded 终态。
+// 注意与 RewriteInflightExpiry / VoidInflightClaims 的"未终态"集合 {claimed,submitted,rejected} 有意不同：
+// 时间过期豁免 submitted，而运营动作（改 ends_at 回写、软删作废）纳入 submitted。
 func (q *Queries) ExpireClaims(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, expireClaims)
 	if err != nil {
@@ -768,6 +770,7 @@ type RewriteInflightExpiryParams struct {
 }
 
 // 编辑 ends_at 时把未终态在途记录的 expires_at 同步回写（运营语义）。
+// 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
 func (q *Queries) RewriteInflightExpiry(ctx context.Context, arg RewriteInflightExpiryParams) error {
 	_, err := q.db.Exec(ctx, rewriteInflightExpiry, arg.ExpiresAt, arg.TaskID)
 	return err
@@ -1007,6 +1010,7 @@ WHERE task_id = $1 AND status IN ('claimed', 'submitted', 'rejected')
 `
 
 // 软删定义时作废全部未终态在途记录（已发奖终态不动）。
+// 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
 func (q *Queries) VoidInflightClaims(ctx context.Context, taskID int64) error {
 	_, err := q.db.Exec(ctx, voidInflightClaims, taskID)
 	return err

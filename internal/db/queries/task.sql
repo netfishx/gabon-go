@@ -87,7 +87,9 @@ ORDER BY tc.id
 LIMIT sqlc.arg('row_limit');
 
 -- name: ExpireClaims :execrows
--- 过期作废 {claimed, rejected}：待审核与已发奖豁免（cron 每 5 分钟）。
+-- 时间过期作废 {claimed, rejected}：submitted 豁免（用户已尽义务，积压属运营问题）、rewarded 终态。
+-- 注意与 RewriteInflightExpiry / VoidInflightClaims 的"未终态"集合 {claimed,submitted,rejected} 有意不同：
+-- 时间过期豁免 submitted，而运营动作（改 ends_at 回写、软删作废）纳入 submitted。
 UPDATE task_claims
 SET status = 'expired', updated_at = now()
 WHERE expires_at IS NOT NULL AND expires_at < now()
@@ -177,6 +179,7 @@ RETURNING *;
 
 -- name: RewriteInflightExpiry :exec
 -- 编辑 ends_at 时把未终态在途记录的 expires_at 同步回写（运营语义）。
+-- 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
 UPDATE task_claims SET expires_at = sqlc.arg('expires_at'), updated_at = now()
 WHERE task_id = sqlc.arg('task_id') AND status IN ('claimed', 'submitted', 'rejected');
 
@@ -190,5 +193,6 @@ WHERE id = $1 AND deleted_at IS NULL;
 
 -- name: VoidInflightClaims :exec
 -- 软删定义时作废全部未终态在途记录（已发奖终态不动）。
+-- 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
 UPDATE task_claims SET status = 'expired', updated_at = now()
 WHERE task_id = $1 AND status IN ('claimed', 'submitted', 'rejected');
