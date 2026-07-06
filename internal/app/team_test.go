@@ -108,6 +108,18 @@ func TestTeamMembersDrillDown(t *testing.T) {
 	if got, _ := first["subordinate_count"].(float64); got != 1 {
 		t.Errorf("C.subordinate_count = %v, want 1", first["subordinate_count"])
 	}
+
+	// 边界断言：C 下的 D 是深度 3 成员，其下级（E，深度 4）在团队之外，
+	// 计数必须归 0——不向查看者泄漏界外结构（PR #27 review P2）
+	_, body = teamMembers(t, tokenA, publicIDOf(t, chain.names[2]), "")
+	items, _ = body["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("C members = %d 条, want 1: %v", len(items), body)
+	}
+	dRow, _ := items[0].(map[string]any)
+	if got, _ := dRow["subordinate_count"].(float64); got != 0 {
+		t.Errorf("D.subordinate_count = %v, want 0（深度 4 不在团队内）", dRow["subordinate_count"])
+	}
 	if got, _ := first["valid"].(bool); got {
 		t.Errorf("C.valid = true, want false (未凑齐条件)")
 	}

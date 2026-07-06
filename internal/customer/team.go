@@ -22,13 +22,17 @@ func teamForbidden() *apierr.Error {
 
 // ListTeamMembers 团队下级列表：parentPublicID 为空 = 查看者本人的直接下级；
 // 指定时必须是本人或团队内深度 ≤2 的成员，越权返回 403（不复刻旧版静默空列表）。
+// parent 已到深度 2 时成员为深度 3，其下级在团队之外——计数归 0，不泄漏界外结构。
 func (s *Service) ListTeamMembers(ctx context.Context, viewer *db.Customer, parentPublicID string, cursor int64, limit int32) (items []db.ListTeamMembersRow, next int64, err error) {
-	parentID, err := s.resolveTeamParent(ctx, viewer, parentPublicID)
+	parentID, parentDepth, err := s.resolveTeamParent(ctx, viewer, parentPublicID)
 	if err != nil {
 		return nil, 0, err
 	}
 	items, err = s.q.ListTeamMembers(ctx, db.ListTeamMembersParams{
-		ParentID: &parentID, Cursor: cursor, RowLimit: limit + 1,
+		CountSubordinates: parentDepth < maxParentDepth,
+		ParentID:          &parentID,
+		Cursor:            cursor,
+		RowLimit:          limit + 1,
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list team members: %w", err)
@@ -40,23 +44,23 @@ func (s *Service) ListTeamMembers(ctx context.Context, viewer *db.Customer, pare
 	return items, next, nil
 }
 
-// resolveTeamParent 校验并解析下钻 parent 的越权守卫。
-func (s *Service) resolveTeamParent(ctx context.Context, viewer *db.Customer, parentPublicID string) (int64, error) {
+// resolveTeamParent 校验并解析下钻 parent 的越权守卫；返回 parent 相对查看者的深度（本人 = 0）。
+func (s *Service) resolveTeamParent(ctx context.Context, viewer *db.Customer, parentPublicID string) (int64, int, error) {
 	if parentPublicID == "" || parentPublicID == viewer.PublicID {
-		return viewer.ID, nil
+		return viewer.ID, 0, nil
 	}
 	parent, err := s.q.GetCustomerByPublicID(ctx, parentPublicID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, apierr.New(http.StatusNotFound, apierr.CodeCustomerNotFound, "customer not found")
+		return 0, 0, apierr.New(http.StatusNotFound, apierr.CodeCustomerNotFound, "customer not found")
 	}
 	if err != nil {
-		return 0, fmt.Errorf("resolve team parent: %w", err)
+		return 0, 0, fmt.Errorf("resolve team parent: %w", err)
 	}
 	depth := relativeDepth(parent.Ancestors, viewer.ID)
 	if depth < 1 || depth > maxParentDepth {
-		return 0, teamForbidden()
+		return 0, 0, teamForbidden()
 	}
-	return parent.ID, nil
+	return parent.ID, depth, nil
 }
 
 // relativeDepth 目标相对 viewer 的邀请深度（自物化祖先路径推算）；

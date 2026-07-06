@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -133,5 +134,98 @@ func TestConcurrentValidFlipRewardsExactlyOnce(t *testing.T) {
 	}
 	if ledgerSum != walletTotal {
 		t.Errorf("audit invariant broken: ledger sum = %d, wallet total = %d", ledgerSum, walletTotal)
+	}
+}
+
+// 并发 cap 集成测（PR #27 review P1）：邀请人差 1 笔到 invite_reward_cap 时，
+// 两个不同被邀请人并发翻转——cap 检查若不对邀请人行加锁串行化，
+// 两个事务各自只见"已提交 + 自己"，会双双放行超发。
+func TestInviteRewardCapNotExceededUnderConcurrentFlips(t *testing.T) {
+	ctx := context.Background()
+	pool, cleanup, err := testdb.Start(ctx)
+	if err != nil {
+		t.Fatalf("start testdb: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	wallets := wallet.NewService(pool)
+	svc := NewService(pool, wallets)
+
+	inviter, err := svc.Register(ctx, "cap_inviter", "secret123", "")
+	if err != nil {
+		t.Fatalf("register inviter: %v", err)
+	}
+	// staging：4 个已有效的被邀请人（level 0 cap=5，差 1 笔到顶）
+	for i := range 4 {
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO customers (public_id, username, password_hash, invite_code, inviter_id, valid_at)
+			 VALUES ($1, $2, 'not-a-real-hash', $3, $4, now())`,
+			fmt.Sprintf("capfix%06d", i), fmt.Sprintf("cap_seed_%d", i),
+			fmt.Sprintf("CP%06d", i), inviter.ID); err != nil {
+			t.Fatalf("stage valid invitee %d: %v", i, err)
+		}
+	}
+
+	stageContender := func(name, phone string) int64 {
+		t.Helper()
+		c, err := svc.Register(ctx, name, "secret123", inviter.InviteCode)
+		if err != nil {
+			t.Fatalf("register %s: %v", name, err)
+		}
+		if _, err := pool.Exec(ctx,
+			`UPDATE customers SET video_count = 1, invite_count = 1, phone = $2 WHERE id = $1`,
+			c.ID, phone); err != nil {
+			t.Fatalf("stage %s: %v", name, err)
+		}
+		return c.ID
+	}
+	b1 := stageContender("cap_contender_1", "13800020001")
+	b2 := stageContender("cap_contender_2", "13800020002")
+
+	// 手工交错：tx1 完成 flip+grant 后持锁不提交；tx2 并发翻转另一个被邀请人
+	tx1, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx1: %v", err)
+	}
+	defer tx1.Rollback(ctx) //nolint:errcheck // 提交后回滚是 no-op
+	flipped1, err := svc.MarkValidIfQualifiedTx(ctx, tx1, b1)
+	if err != nil || !flipped1 {
+		t.Fatalf("tx1 flip: flipped = %v, err = %v", flipped1, err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+			_, err := svc.MarkValidIfQualifiedTx(ctx, tx, b2)
+			return err
+		})
+	}()
+
+	// 让 tx2 有时间跑进 cap 检查（正确实现下它应阻塞在邀请人行锁上）
+	time.Sleep(300 * time.Millisecond)
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatalf("commit tx1: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("tx2: %v", err)
+	}
+
+	// cap=5、已 4 笔有效：两个竞争者只能发出 1 笔
+	var rewardTx int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM transactions WHERE type = 'invite_valid_reward' AND customer_id = $1`,
+		inviter.ID).Scan(&rewardTx); err != nil {
+		t.Fatalf("count reward tx: %v", err)
+	}
+	if rewardTx != 1 {
+		t.Errorf("reward tx = %d, want 1 (cap must not be exceeded)", rewardTx)
+	}
+	var available int64
+	if err := pool.QueryRow(ctx,
+		`SELECT available FROM wallets WHERE customer_id = $1`, inviter.ID).Scan(&available); err != nil {
+		t.Fatalf("query wallet: %v", err)
+	}
+	if available != 123 {
+		t.Errorf("inviter available = %d, want 123", available)
 	}
 }

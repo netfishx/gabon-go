@@ -236,20 +236,23 @@ func (q *Queries) IncrementInviteCount(ctx context.Context, id int64) error {
 const listTeamMembers = `-- name: ListTeamMembers :many
 SELECT c.id, c.public_id, c.username, c.name, c.avatar_path,
        (c.valid_at IS NOT NULL)::bool AS valid,
-       (SELECT COUNT(*) FROM customers s
-        WHERE s.inviter_id = c.id AND s.deleted_at IS NULL) AS subordinate_count
+       (CASE WHEN $1::bool THEN
+            (SELECT COUNT(*) FROM customers s
+             WHERE s.inviter_id = c.id AND s.deleted_at IS NULL)
+        ELSE 0 END)::bigint AS subordinate_count
 FROM customers c
-WHERE c.inviter_id = $1
+WHERE c.inviter_id = $2
   AND c.deleted_at IS NULL
-  AND c.id > $2
+  AND c.id > $3
 ORDER BY c.id
-LIMIT $3
+LIMIT $4
 `
 
 type ListTeamMembersParams struct {
-	ParentID *int64
-	Cursor   int64
-	RowLimit int32
+	CountSubordinates bool
+	ParentID          *int64
+	Cursor            int64
+	RowLimit          int32
 }
 
 type ListTeamMembersRow struct {
@@ -263,8 +266,14 @@ type ListTeamMembersRow struct {
 }
 
 // 团队下钻单位：某成员的直接下级，附带各自的直接下级数（id 升序游标分页）。
+// count_subordinates=false 时计数归 0：深度 3 成员的下级在团队之外，不泄漏界外结构。
 func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]ListTeamMembersRow, error) {
-	rows, err := q.db.Query(ctx, listTeamMembers, arg.ParentID, arg.Cursor, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listTeamMembers,
+		arg.CountSubordinates,
+		arg.ParentID,
+		arg.Cursor,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +298,22 @@ func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockInviterForGrant = `-- name: LockInviterForGrant :one
+SELECT vip_level FROM customers
+WHERE id = $1 AND deleted_at IS NULL
+FOR NO KEY UPDATE
+`
+
+// 发奖前锁邀请人行，串行化同一邀请人的并发 cap 检查——
+// 后到事务重数有效邀请数时必能看见先提交的翻转，杜绝并发超发。
+// FOR NO KEY UPDATE：互相排斥即可，不与注册插入 FK 引用取的 KEY SHARE 冲突。
+func (q *Queries) LockInviterForGrant(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, lockInviterForGrant, id)
+	var vip_level int32
+	err := row.Scan(&vip_level)
+	return vip_level, err
 }
 
 const markCustomerValidIfQualified = `-- name: MarkCustomerValidIfQualified :one

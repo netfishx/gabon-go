@@ -42,12 +42,23 @@ RETURNING inviter_id;
 SELECT COUNT(*) FROM customers
 WHERE inviter_id = $1 AND valid_at IS NOT NULL AND deleted_at IS NULL;
 
+-- name: LockInviterForGrant :one
+-- 发奖前锁邀请人行，串行化同一邀请人的并发 cap 检查——
+-- 后到事务重数有效邀请数时必能看见先提交的翻转，杜绝并发超发。
+-- FOR NO KEY UPDATE：互相排斥即可，不与注册插入 FK 引用取的 KEY SHARE 冲突。
+SELECT vip_level FROM customers
+WHERE id = $1 AND deleted_at IS NULL
+FOR NO KEY UPDATE;
+
 -- name: ListTeamMembers :many
 -- 团队下钻单位：某成员的直接下级，附带各自的直接下级数（id 升序游标分页）。
+-- count_subordinates=false 时计数归 0：深度 3 成员的下级在团队之外，不泄漏界外结构。
 SELECT c.id, c.public_id, c.username, c.name, c.avatar_path,
        (c.valid_at IS NOT NULL)::bool AS valid,
-       (SELECT COUNT(*) FROM customers s
-        WHERE s.inviter_id = c.id AND s.deleted_at IS NULL) AS subordinate_count
+       (CASE WHEN sqlc.arg('count_subordinates')::bool THEN
+            (SELECT COUNT(*) FROM customers s
+             WHERE s.inviter_id = c.id AND s.deleted_at IS NULL)
+        ELSE 0 END)::bigint AS subordinate_count
 FROM customers c
 WHERE c.inviter_id = sqlc.arg('parent_id')
   AND c.deleted_at IS NULL

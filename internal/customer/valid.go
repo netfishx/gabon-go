@@ -35,6 +35,8 @@ func (s *Service) MarkValidIfQualifiedTx(ctx context.Context, tx pgx.Tx, custome
 // grantInviteRewardTx 翻转事务内给邀请人发放邀请有效奖励。
 // 金额读活动奖励配置（缺行/停用/为 0 → 不发放，不复刻旧版代码 123 兜底）；
 // 受邀请人 VIP 档 invite_reward_cap 约束：有效邀请数（含本次，事务内可见）超过上限即跳过。
+// cap 检查前对邀请人行取 FOR NO KEY UPDATE 锁——不同被邀请人的并发翻转不会撞行锁，
+// 若不在此串行化，两个事务各自只见"已提交 + 自己"，会在差 1 笔到顶时双双放行超发。
 // 发奖幂等第一道闸是 valid_at 的 CAS；流水 (type, ref=被邀请人) 唯一约束是最后防线，
 // 撞上即数据异常，错误原样上抛令整个触发事务回滚。
 func (s *Service) grantInviteRewardTx(ctx context.Context, tx pgx.Tx, inviterID, inviteeID int64) error {
@@ -51,13 +53,13 @@ func (s *Service) grantInviteRewardTx(ctx context.Context, tx pgx.Tx, inviterID,
 		return nil
 	}
 
-	inviter, err := q.GetCustomerByID(ctx, inviterID)
+	vipLevel, err := q.LockInviterForGrant(ctx, inviterID)
 	if err != nil {
-		return fmt.Errorf("load inviter %d: %w", inviterID, err)
+		return fmt.Errorf("lock inviter %d: %w", inviterID, err)
 	}
-	rewardCap, err := q.GetVipInviteRewardCap(ctx, inviter.VipLevel)
+	rewardCap, err := q.GetVipInviteRewardCap(ctx, vipLevel)
 	if err != nil {
-		return fmt.Errorf("read vip %d invite cap: %w", inviter.VipLevel, err)
+		return fmt.Errorf("read vip %d invite cap: %w", vipLevel, err)
 	}
 	validCount, err := q.CountValidInvitees(ctx, &inviterID)
 	if err != nil {
