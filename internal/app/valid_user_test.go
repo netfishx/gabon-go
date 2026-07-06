@@ -152,3 +152,38 @@ func TestValidUserNeverReverts(t *testing.T) {
 		t.Errorf("valid_at changed: first = %v, again = %v", first, again)
 	}
 }
+
+func TestDeletedVideoDoesNotQualify(t *testing.T) {
+	// 审核通过后删除唯一作品（PR #27 review）："有作品"不得再成立，
+	// 后续补齐其他条件不得翻转、不得发奖。旧版不减计数存在同样的洞，有意不复刻。
+	nameA, nameB, nameC := uniqueUsername(t), uniqueUsername(t), uniqueUsername(t)
+	bodyA := registerCustomer(t, nameA, "")
+	bodyB := registerCustomer(t, nameB, inviteCodeOf(t, bodyA))
+	registerCustomer(t, nameC, inviteCodeOf(t, bodyB))
+	tokenB := loginCustomer(t, nameB, "secret123")
+
+	adminToken := loginAdmin(t)
+	publicID, _ := stagePendingVideo(t, nameB)
+	if resp, body := postJSON(t, "/admin/v1/videos/"+publicID+"/approve", nil, adminToken); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("approve: status = %d, body = %v", resp.StatusCode, body)
+	}
+
+	// 删除唯一已发布作品
+	if resp, body := doJSON(t, http.MethodDelete, "/api/v1/videos/"+publicID, tokenB, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete video: status = %d, body = %v", resp.StatusCode, body)
+	}
+
+	// 补齐最后一块拼图：不得翻转、邀请人不得入账
+	bindPhone(t, tokenB)
+	assertValid(t, tokenB, false)
+	if n := inviteRewardTxCount(t, nameB); n != 0 {
+		t.Errorf("reward tx after deleted-video qualify attempt = %d, want 0", n)
+	}
+
+	// 再过审一部新作品：计数对称恢复，正常翻转发奖
+	approveVideoOf(t, nameB)
+	assertValid(t, tokenB, true)
+	if n := inviteRewardTxCount(t, nameB); n != 1 {
+		t.Errorf("reward tx after re-approve = %d, want 1", n)
+	}
+}
