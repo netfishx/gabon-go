@@ -30,8 +30,9 @@ func (s *Service) UpdateProfile(ctx context.Context, customerID int64, p Profile
 	}
 	var c db.Customer
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
 		var err error
-		c, err = s.q.WithTx(tx).UpdateCustomerProfile(ctx, db.UpdateCustomerProfileParams{
+		c, err = q.UpdateCustomerProfile(ctx, db.UpdateCustomerProfileParams{
 			ID:        customerID,
 			Name:      p.Name,
 			Signature: p.Signature,
@@ -42,8 +43,16 @@ func (s *Service) UpdateProfile(ctx context.Context, customerID int64, p Profile
 			return err
 		}
 		if p.Email != nil || p.Phone != nil {
-			if _, err := s.MarkValidIfQualifiedTx(ctx, tx, customerID); err != nil {
+			flipped, err := s.MarkValidIfQualifiedTx(ctx, tx, customerID)
+			if err != nil {
 				return err
+			}
+			if flipped {
+				// 本次写入恰好补齐最后一个条件：重读客户行，响应须反映刚翻转的 valid_at
+				c, err = q.GetCustomerByID(ctx, customerID)
+				if err != nil {
+					return fmt.Errorf("reload customer after flip: %w", err)
+				}
 			}
 		}
 		return nil

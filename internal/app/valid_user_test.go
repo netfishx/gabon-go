@@ -74,7 +74,17 @@ func TestValidUserFlipOnContact(t *testing.T) {
 	approveVideoOf(t, nameB)
 	assertValid(t, tokenB, false) // 缺联系方式，不翻转
 
-	bindPhone(t, tokenB)
+	// 补齐最后一块拼图的这次 PATCH，响应体本身必须已反映翻转（不得返回旧行快照）
+	resp, patchBody := doJSON(t, http.MethodPatch, "/api/v1/me/profile", tokenB, map[string]any{
+		"phone": uniquePhone(t),
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("bind phone: status = %d, body = %v", resp.StatusCode, patchBody)
+	}
+	if got, _ := patchBody["valid"].(bool); !got {
+		t.Errorf("PATCH response valid = %v, want true（翻转须反映在本次响应中）", patchBody["valid"])
+	}
+
 	body := assertValid(t, tokenB, true)
 
 	// 两种邀请数口径命名区分：总邀请数（注册即算）=1，有效邀请数=0（C 未有效）
