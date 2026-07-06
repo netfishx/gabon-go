@@ -33,6 +33,16 @@ const (
 	CodeUploadPathForbidden = "UPLOAD_PATH_FORBIDDEN"
 	CodeUploadObjectMissing = "UPLOAD_OBJECT_MISSING"
 
+	CodeClaimTaskNotFound       = "CLAIM_TASK_NOT_FOUND"
+	CodeClaimTaskOffline        = "CLAIM_TASK_OFFLINE"
+	CodeClaimTaskWindowClosed   = "CLAIM_TASK_WINDOW_CLOSED"
+	CodeClaimTaskVipRequired    = "CLAIM_TASK_VIP_REQUIRED"
+	CodeClaimTaskAlreadyClaimed = "CLAIM_TASK_ALREADY_CLAIMED"
+	CodeClaimTaskNotSubmittable = "CLAIM_TASK_NOT_SUBMITTABLE"
+	CodeClaimTaskNotReviewable  = "CLAIM_TASK_NOT_REVIEWABLE"
+
+	CodeAdminForbidden = "ADMIN_FORBIDDEN"
+
 	CodeVideoPathForbidden     = "VIDEO_PATH_FORBIDDEN"
 	CodeVideoObjectMissing     = "VIDEO_OBJECT_MISSING"
 	CodeVideoNotFound          = "VIDEO_NOT_FOUND"

@@ -49,6 +49,8 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/team/members", h.handleTeamMembers)
 		r.Get("/team/summary", h.handleTeamSummary)
 		r.Get("/tasks", h.handleTasks)
+		r.Post("/claim-tasks/{taskID}/claim", h.handleClaimTaskClaim)
+		r.Post("/claim-tasks/claims/{claimID}/submit", h.handleClaimTaskSubmit)
 		r.Post("/uploads/images", h.handleImageUpload)
 		r.Post("/videos/uploads", h.handleVideoUpload)
 		r.Post("/videos", h.handleVideoConfirm)

@@ -66,21 +66,22 @@ func (h *Handler) handleImageUpload(w http.ResponseWriter, r *http.Request) {
 	apierr.WriteJSON(w, http.StatusCreated, imageUploadResponse{StoragePath: storagePath, UploadURL: uploadURL})
 }
 
-// validateAvatarPath 头像消费校验：本人 avatars 前缀 + 白名单扩展名 + 对象真实存在。
-func (h *Handler) validateAvatarPath(r *http.Request, customerID int64, path string) error {
-	if !strings.HasPrefix(path, fmt.Sprintf("avatars/%d/", customerID)) {
-		return apierr.New(http.StatusForbidden, apierr.CodeUploadPathForbidden, "avatar path does not belong to you")
+// validateImagePath 图片消费三重校验：本人 {kindDir} 前缀 + 白名单扩展名 + 对象真实存在。
+// 头像（avatars）与任务证明（proofs）共用；kind 决定路径段与文案。
+func (h *Handler) validateImagePath(r *http.Request, customerID int64, kindDir, path string) error {
+	if !strings.HasPrefix(path, fmt.Sprintf("%s/%d/", kindDir, customerID)) {
+		return apierr.New(http.StatusForbidden, apierr.CodeUploadPathForbidden, kindDir+" path does not belong to you")
 	}
 	dot := strings.LastIndex(path, ".")
 	if dot < 0 || !imageExts[path[dot+1:]] {
-		return apierr.InvalidArgument("avatar path has unsupported ext")
+		return apierr.InvalidArgument(kindDir + " path has unsupported ext")
 	}
 	exists, err := h.Store.Exists(r.Context(), path)
 	if err != nil {
 		return err
 	}
 	if !exists {
-		return apierr.New(http.StatusBadRequest, apierr.CodeUploadObjectMissing, "avatar object not found")
+		return apierr.New(http.StatusBadRequest, apierr.CodeUploadObjectMissing, kindDir+" object not found")
 	}
 	return nil
 }

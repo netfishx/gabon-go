@@ -38,3 +38,50 @@ ON CONFLICT DO NOTHING;
 -- name: ListTaskProgressForKeys :many
 SELECT * FROM periodic_task_progress
 WHERE customer_id = $1 AND period_key = ANY(sqlc.arg('period_keys')::text[]);
+
+-- name: GetClaimTask :one
+SELECT * FROM claim_tasks WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: InsertTaskClaim :one
+-- 领取：一人一次由 (customer_id, task_id) 唯一约束保证；reward_base 与 expires_at 领取时快照。
+INSERT INTO task_claims (customer_id, task_id, status, reward_base, expires_at)
+VALUES ($1, $2, 'claimed', sqlc.arg('reward_base'), sqlc.arg('expires_at'))
+RETURNING *;
+
+-- name: GetTaskClaim :one
+SELECT * FROM task_claims WHERE id = $1;
+
+-- name: SubmitTaskClaim :execrows
+-- 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted，清空上轮驳回痕迹）。
+UPDATE task_claims
+SET status = 'submitted', proof_text = sqlc.narg('proof_text'),
+    proof_images = sqlc.arg('proof_images'), submitted_at = now(),
+    reviewed_by = NULL, reviewed_at = NULL, review_remark = NULL, updated_at = now()
+WHERE id = sqlc.arg('id') AND customer_id = sqlc.arg('customer_id')
+  AND status IN ('claimed', 'rejected');
+
+-- name: RejectTaskClaim :execrows
+UPDATE task_claims
+SET status = 'rejected', reviewed_by = sqlc.arg('reviewed_by'), reviewed_at = now(),
+    review_remark = sqlc.arg('review_remark'), updated_at = now()
+WHERE id = sqlc.arg('id') AND status = 'submitted';
+
+-- name: ApproveTaskClaim :one
+-- 审核即发奖一步：submitted→rewarded 单次条件 UPDATE，reviewed_*/rewarded_* 同落。
+-- 返回 customer_id 与实发额供同事务入账。
+UPDATE task_claims
+SET status = 'rewarded', reviewed_by = sqlc.arg('reviewed_by'), reviewed_at = now(),
+    reward_granted = sqlc.arg('reward_granted'), rewarded_at = now(), updated_at = now()
+WHERE id = sqlc.arg('id') AND status = 'submitted'
+RETURNING customer_id;
+
+-- name: ListPendingClaims :many
+-- 待审核队列（先进先出，id 升序游标）：附任务要求与凭证供管理员参考。
+-- 奖励取领取时快照 reward_base，与审核实际发奖口径一致（定义改 reward 不影响在途）。
+SELECT tc.id, tc.customer_id, tc.proof_text, tc.proof_images, tc.submitted_at,
+       ct.name AS task_name, ct.requirement, tc.reward_base
+FROM task_claims tc
+JOIN claim_tasks ct ON ct.id = tc.task_id
+WHERE tc.status = 'submitted' AND tc.id > sqlc.arg('cursor')
+ORDER BY tc.id
+LIMIT sqlc.arg('row_limit');

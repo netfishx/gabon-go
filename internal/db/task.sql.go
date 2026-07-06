@@ -7,7 +7,60 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const approveTaskClaim = `-- name: ApproveTaskClaim :one
+UPDATE task_claims
+SET status = 'rewarded', reviewed_by = $1, reviewed_at = now(),
+    reward_granted = $2, rewarded_at = now(), updated_at = now()
+WHERE id = $3 AND status = 'submitted'
+RETURNING customer_id
+`
+
+type ApproveTaskClaimParams struct {
+	ReviewedBy    *int64
+	RewardGranted *int64
+	ID            int64
+}
+
+// 审核即发奖一步：submitted→rewarded 单次条件 UPDATE，reviewed_*/rewarded_* 同落。
+// 返回 customer_id 与实发额供同事务入账。
+func (q *Queries) ApproveTaskClaim(ctx context.Context, arg ApproveTaskClaimParams) (int64, error) {
+	row := q.db.QueryRow(ctx, approveTaskClaim, arg.ReviewedBy, arg.RewardGranted, arg.ID)
+	var customer_id int64
+	err := row.Scan(&customer_id)
+	return customer_id, err
+}
+
+const getClaimTask = `-- name: GetClaimTask :one
+SELECT id, name, description, icon_path, min_vip_level, reward, requirement, flow, link, display_order, enabled, starts_at, ends_at, deleted_at, created_at, updated_at FROM claim_tasks WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) GetClaimTask(ctx context.Context, id int64) (ClaimTask, error) {
+	row := q.db.QueryRow(ctx, getClaimTask, id)
+	var i ClaimTask
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IconPath,
+		&i.MinVipLevel,
+		&i.Reward,
+		&i.Requirement,
+		&i.Flow,
+		&i.Link,
+		&i.DisplayOrder,
+		&i.Enabled,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const getCustomerRewardMultiplierBp = `-- name: GetCustomerRewardMultiplierBp :one
 SELECT v.reward_multiplier_bp FROM customers c
@@ -20,6 +73,35 @@ func (q *Queries) GetCustomerRewardMultiplierBp(ctx context.Context, id int64) (
 	var reward_multiplier_bp int32
 	err := row.Scan(&reward_multiplier_bp)
 	return reward_multiplier_bp, err
+}
+
+const getTaskClaim = `-- name: GetTaskClaim :one
+SELECT id, customer_id, task_id, status, proof_text, proof_images, reward_base, reward_granted, expires_at, claimed_at, submitted_at, reviewed_by, reviewed_at, review_remark, rewarded_at, created_at, updated_at FROM task_claims WHERE id = $1
+`
+
+func (q *Queries) GetTaskClaim(ctx context.Context, id int64) (TaskClaim, error) {
+	row := q.db.QueryRow(ctx, getTaskClaim, id)
+	var i TaskClaim
+	err := row.Scan(
+		&i.ID,
+		&i.CustomerID,
+		&i.TaskID,
+		&i.Status,
+		&i.ProofText,
+		&i.ProofImages,
+		&i.RewardBase,
+		&i.RewardGranted,
+		&i.ExpiresAt,
+		&i.ClaimedAt,
+		&i.SubmittedAt,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.ReviewRemark,
+		&i.RewardedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const grantTaskRewardIfDue = `-- name: GrantTaskRewardIfDue :execrows
@@ -41,6 +123,50 @@ func (q *Queries) GrantTaskRewardIfDue(ctx context.Context, arg GrantTaskRewardI
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const insertTaskClaim = `-- name: InsertTaskClaim :one
+INSERT INTO task_claims (customer_id, task_id, status, reward_base, expires_at)
+VALUES ($1, $2, 'claimed', $3, $4)
+RETURNING id, customer_id, task_id, status, proof_text, proof_images, reward_base, reward_granted, expires_at, claimed_at, submitted_at, reviewed_by, reviewed_at, review_remark, rewarded_at, created_at, updated_at
+`
+
+type InsertTaskClaimParams struct {
+	CustomerID int64
+	TaskID     int64
+	RewardBase int64
+	ExpiresAt  pgtype.Timestamptz
+}
+
+// 领取：一人一次由 (customer_id, task_id) 唯一约束保证；reward_base 与 expires_at 领取时快照。
+func (q *Queries) InsertTaskClaim(ctx context.Context, arg InsertTaskClaimParams) (TaskClaim, error) {
+	row := q.db.QueryRow(ctx, insertTaskClaim,
+		arg.CustomerID,
+		arg.TaskID,
+		arg.RewardBase,
+		arg.ExpiresAt,
+	)
+	var i TaskClaim
+	err := row.Scan(
+		&i.ID,
+		&i.CustomerID,
+		&i.TaskID,
+		&i.Status,
+		&i.ProofText,
+		&i.ProofImages,
+		&i.RewardBase,
+		&i.RewardGranted,
+		&i.ExpiresAt,
+		&i.ClaimedAt,
+		&i.SubmittedAt,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.ReviewRemark,
+		&i.RewardedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const listEnabledPeriodicTasks = `-- name: ListEnabledPeriodicTasks :many
@@ -123,6 +249,63 @@ func (q *Queries) ListEnabledPeriodicTasksByCategory(ctx context.Context, catego
 	return items, nil
 }
 
+const listPendingClaims = `-- name: ListPendingClaims :many
+SELECT tc.id, tc.customer_id, tc.proof_text, tc.proof_images, tc.submitted_at,
+       ct.name AS task_name, ct.requirement, tc.reward_base
+FROM task_claims tc
+JOIN claim_tasks ct ON ct.id = tc.task_id
+WHERE tc.status = 'submitted' AND tc.id > $1
+ORDER BY tc.id
+LIMIT $2
+`
+
+type ListPendingClaimsParams struct {
+	Cursor   int64
+	RowLimit int32
+}
+
+type ListPendingClaimsRow struct {
+	ID          int64
+	CustomerID  int64
+	ProofText   *string
+	ProofImages []string
+	SubmittedAt pgtype.Timestamptz
+	TaskName    string
+	Requirement *string
+	RewardBase  int64
+}
+
+// 待审核队列（先进先出，id 升序游标）：附任务要求与凭证供管理员参考。
+// 奖励取领取时快照 reward_base，与审核实际发奖口径一致（定义改 reward 不影响在途）。
+func (q *Queries) ListPendingClaims(ctx context.Context, arg ListPendingClaimsParams) ([]ListPendingClaimsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingClaims, arg.Cursor, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingClaimsRow
+	for rows.Next() {
+		var i ListPendingClaimsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CustomerID,
+			&i.ProofText,
+			&i.ProofImages,
+			&i.SubmittedAt,
+			&i.TaskName,
+			&i.Requirement,
+			&i.RewardBase,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskProgressForKeys = `-- name: ListTaskProgressForKeys :many
 SELECT id, customer_id, task_id, period_key, progress, target, completed_at, reward_granted_at, reward_amount, created_at, updated_at FROM periodic_task_progress
 WHERE customer_id = $1 AND period_key = ANY($2::text[])
@@ -180,6 +363,57 @@ type MarkWatchProgressParams struct {
 // watch 防刷标记（推进事务内执行）：唯一约束仲裁并发，0 行 = 本周期该视频已计过。
 func (q *Queries) MarkWatchProgress(ctx context.Context, arg MarkWatchProgressParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markWatchProgress, arg.CustomerID, arg.VideoID, arg.PeriodKey)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const rejectTaskClaim = `-- name: RejectTaskClaim :execrows
+UPDATE task_claims
+SET status = 'rejected', reviewed_by = $1, reviewed_at = now(),
+    review_remark = $2, updated_at = now()
+WHERE id = $3 AND status = 'submitted'
+`
+
+type RejectTaskClaimParams struct {
+	ReviewedBy   *int64
+	ReviewRemark *string
+	ID           int64
+}
+
+func (q *Queries) RejectTaskClaim(ctx context.Context, arg RejectTaskClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rejectTaskClaim, arg.ReviewedBy, arg.ReviewRemark, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const submitTaskClaim = `-- name: SubmitTaskClaim :execrows
+UPDATE task_claims
+SET status = 'submitted', proof_text = $1,
+    proof_images = $2, submitted_at = now(),
+    reviewed_by = NULL, reviewed_at = NULL, review_remark = NULL, updated_at = now()
+WHERE id = $3 AND customer_id = $4
+  AND status IN ('claimed', 'rejected')
+`
+
+type SubmitTaskClaimParams struct {
+	ProofText   *string
+	ProofImages []string
+	ID          int64
+	CustomerID  int64
+}
+
+// 提交证明：claimed/rejected 可提交（驳回重提覆盖凭证回 submitted，清空上轮驳回痕迹）。
+func (q *Queries) SubmitTaskClaim(ctx context.Context, arg SubmitTaskClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, submitTaskClaim,
+		arg.ProofText,
+		arg.ProofImages,
+		arg.ID,
+		arg.CustomerID,
+	)
 	if err != nil {
 		return 0, err
 	}

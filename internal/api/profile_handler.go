@@ -57,7 +57,7 @@ func (h *Handler) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	me := customerFrom(r.Context())
 	if req.AvatarPath != nil {
-		if err := h.validateAvatarPath(r, me.ID, *req.AvatarPath); err != nil {
+		if err := h.validateImagePath(r, me.ID, imageKinds["avatar"], *req.AvatarPath); err != nil {
 			apierr.Write(w, err)
 			return
 		}
