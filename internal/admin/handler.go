@@ -34,12 +34,22 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/videos/{publicID}/approve", h.handleApproveVideo)
 		r.Post("/videos/{publicID}/reject", h.handleRejectVideo)
 
-		// 敏感操作仅 ADMIN（checklist M）：任务审核挂角色门禁
+		// 敏感操作仅 ADMIN（checklist M）：任务审核与定义管理挂角色门禁
 		r.Group(func(r chi.Router) {
 			r.Use(requireRole(db.AdminRoleAdmin))
 			r.Get("/claim-tasks/reviews", h.handlePendingClaims)
 			r.Post("/claim-tasks/claims/{claimID}/approve", h.handleApproveClaim)
 			r.Post("/claim-tasks/claims/{claimID}/reject", h.handleRejectClaim)
+
+			r.Get("/periodic-tasks", h.handleListPeriodicTasks)
+			r.Post("/periodic-tasks", h.handleCreatePeriodicTask)
+			r.Patch("/periodic-tasks/{id}", h.handleUpdatePeriodicTask)
+
+			r.Get("/claim-tasks", h.handleListClaimTasks)
+			r.Post("/claim-tasks", h.handleCreateClaimTask)
+			r.Patch("/claim-tasks/{id}", h.handleUpdateClaimTask)
+			r.Patch("/claim-tasks/{id}/status", h.handleToggleClaimTaskStatus)
+			r.Delete("/claim-tasks/{id}", h.handleDeleteClaimTask)
 		})
 	})
 	return r

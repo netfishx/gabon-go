@@ -34,6 +34,114 @@ func (q *Queries) ApproveTaskClaim(ctx context.Context, arg ApproveTaskClaimPara
 	return customer_id, err
 }
 
+const createClaimTask = `-- name: CreateClaimTask :one
+INSERT INTO claim_tasks (name, description, icon_path, min_vip_level, reward,
+                         requirement, flow, link, display_order, starts_at, ends_at, enabled)
+VALUES ($1, $2, $3,
+        $4, $5,
+        $6, $7, $8,
+        $9, $10, $11, true)
+RETURNING id, name, description, icon_path, min_vip_level, reward, requirement, flow, link, display_order, enabled, starts_at, ends_at, deleted_at, created_at, updated_at
+`
+
+type CreateClaimTaskParams struct {
+	Name         string
+	Description  *string
+	IconPath     *string
+	MinVipLevel  int32
+	Reward       int64
+	Requirement  *string
+	Flow         *string
+	Link         *string
+	DisplayOrder int32
+	StartsAt     pgtype.Timestamptz
+	EndsAt       pgtype.Timestamptz
+}
+
+func (q *Queries) CreateClaimTask(ctx context.Context, arg CreateClaimTaskParams) (ClaimTask, error) {
+	row := q.db.QueryRow(ctx, createClaimTask,
+		arg.Name,
+		arg.Description,
+		arg.IconPath,
+		arg.MinVipLevel,
+		arg.Reward,
+		arg.Requirement,
+		arg.Flow,
+		arg.Link,
+		arg.DisplayOrder,
+		arg.StartsAt,
+		arg.EndsAt,
+	)
+	var i ClaimTask
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IconPath,
+		&i.MinVipLevel,
+		&i.Reward,
+		&i.Requirement,
+		&i.Flow,
+		&i.Link,
+		&i.DisplayOrder,
+		&i.Enabled,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createPeriodicTask = `-- name: CreatePeriodicTask :one
+INSERT INTO periodic_tasks (name, description, icon_path, category, period, target, reward, display_order, enabled)
+VALUES ($1, $2, $3, $4,
+        $5, $6, $7, $8, true)
+RETURNING id, name, description, icon_path, category, period, target, reward, display_order, enabled, deleted_at, created_at, updated_at
+`
+
+type CreatePeriodicTaskParams struct {
+	Name         string
+	Description  *string
+	IconPath     *string
+	Category     TaskCategory
+	Period       TaskPeriod
+	Target       int32
+	Reward       int64
+	DisplayOrder int32
+}
+
+func (q *Queries) CreatePeriodicTask(ctx context.Context, arg CreatePeriodicTaskParams) (PeriodicTask, error) {
+	row := q.db.QueryRow(ctx, createPeriodicTask,
+		arg.Name,
+		arg.Description,
+		arg.IconPath,
+		arg.Category,
+		arg.Period,
+		arg.Target,
+		arg.Reward,
+		arg.DisplayOrder,
+	)
+	var i PeriodicTask
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IconPath,
+		&i.Category,
+		&i.Period,
+		&i.Target,
+		&i.Reward,
+		&i.DisplayOrder,
+		&i.Enabled,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const expireClaims = `-- name: ExpireClaims :execrows
 UPDATE task_claims
 SET status = 'expired', updated_at = now()
@@ -235,6 +343,47 @@ func (q *Queries) InsertTaskClaim(ctx context.Context, arg InsertTaskClaimParams
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listClaimTasksAdmin = `-- name: ListClaimTasksAdmin :many
+SELECT id, name, description, icon_path, min_vip_level, reward, requirement, flow, link, display_order, enabled, starts_at, ends_at, deleted_at, created_at, updated_at FROM claim_tasks WHERE deleted_at IS NULL ORDER BY display_order, id
+`
+
+func (q *Queries) ListClaimTasksAdmin(ctx context.Context) ([]ClaimTask, error) {
+	rows, err := q.db.Query(ctx, listClaimTasksAdmin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimTask
+	for rows.Next() {
+		var i ClaimTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.IconPath,
+			&i.MinVipLevel,
+			&i.Reward,
+			&i.Requirement,
+			&i.Flow,
+			&i.Link,
+			&i.DisplayOrder,
+			&i.Enabled,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listClaimTasksForCustomer = `-- name: ListClaimTasksForCustomer :many
@@ -486,6 +635,44 @@ func (q *Queries) ListPendingClaims(ctx context.Context, arg ListPendingClaimsPa
 	return items, nil
 }
 
+const listPeriodicTasksAdmin = `-- name: ListPeriodicTasksAdmin :many
+SELECT id, name, description, icon_path, category, period, target, reward, display_order, enabled, deleted_at, created_at, updated_at FROM periodic_tasks WHERE deleted_at IS NULL ORDER BY display_order, id
+`
+
+func (q *Queries) ListPeriodicTasksAdmin(ctx context.Context) ([]PeriodicTask, error) {
+	rows, err := q.db.Query(ctx, listPeriodicTasksAdmin)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PeriodicTask
+	for rows.Next() {
+		var i PeriodicTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.IconPath,
+			&i.Category,
+			&i.Period,
+			&i.Target,
+			&i.Reward,
+			&i.DisplayOrder,
+			&i.Enabled,
+			&i.DeletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTaskProgressForKeys = `-- name: ListTaskProgressForKeys :many
 SELECT id, customer_id, task_id, period_key, progress, target, completed_at, reward_granted_at, reward_amount, created_at, updated_at FROM periodic_task_progress
 WHERE customer_id = $1 AND period_key = ANY($2::text[])
@@ -570,6 +757,53 @@ func (q *Queries) RejectTaskClaim(ctx context.Context, arg RejectTaskClaimParams
 	return result.RowsAffected(), nil
 }
 
+const rewriteInflightExpiry = `-- name: RewriteInflightExpiry :exec
+UPDATE task_claims SET expires_at = $1, updated_at = now()
+WHERE task_id = $2 AND status IN ('claimed', 'submitted', 'rejected')
+`
+
+type RewriteInflightExpiryParams struct {
+	ExpiresAt pgtype.Timestamptz
+	TaskID    int64
+}
+
+// 编辑 ends_at 时把未终态在途记录的 expires_at 同步回写（运营语义）。
+func (q *Queries) RewriteInflightExpiry(ctx context.Context, arg RewriteInflightExpiryParams) error {
+	_, err := q.db.Exec(ctx, rewriteInflightExpiry, arg.ExpiresAt, arg.TaskID)
+	return err
+}
+
+const setClaimTaskEnabled = `-- name: SetClaimTaskEnabled :execrows
+UPDATE claim_tasks SET enabled = $1, updated_at = now()
+WHERE id = $2 AND deleted_at IS NULL
+`
+
+type SetClaimTaskEnabledParams struct {
+	Enabled bool
+	ID      int64
+}
+
+func (q *Queries) SetClaimTaskEnabled(ctx context.Context, arg SetClaimTaskEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setClaimTaskEnabled, arg.Enabled, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteClaimTask = `-- name: SoftDeleteClaimTask :execrows
+UPDATE claim_tasks SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) SoftDeleteClaimTask(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteClaimTask, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const submitTaskClaim = `-- name: SubmitTaskClaim :execrows
 UPDATE task_claims
 SET status = 'submitted', proof_text = $1,
@@ -598,6 +832,132 @@ func (q *Queries) SubmitTaskClaim(ctx context.Context, arg SubmitTaskClaimParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const updateClaimTask = `-- name: UpdateClaimTask :one
+UPDATE claim_tasks
+SET name          = COALESCE($1, name),
+    description   = COALESCE($2, description),
+    icon_path     = COALESCE($3, icon_path),
+    min_vip_level = COALESCE($4, min_vip_level),
+    reward        = COALESCE($5, reward),
+    requirement   = COALESCE($6, requirement),
+    flow          = COALESCE($7, flow),
+    link          = COALESCE($8, link),
+    display_order = COALESCE($9, display_order),
+    starts_at     = COALESCE($10, starts_at),
+    ends_at       = COALESCE($11, ends_at),
+    updated_at    = now()
+WHERE id = $12 AND deleted_at IS NULL
+RETURNING id, name, description, icon_path, min_vip_level, reward, requirement, flow, link, display_order, enabled, starts_at, ends_at, deleted_at, created_at, updated_at
+`
+
+type UpdateClaimTaskParams struct {
+	Name         *string
+	Description  *string
+	IconPath     *string
+	MinVipLevel  *int32
+	Reward       *int64
+	Requirement  *string
+	Flow         *string
+	Link         *string
+	DisplayOrder *int32
+	StartsAt     pgtype.Timestamptz
+	EndsAt       pgtype.Timestamptz
+	ID           int64
+}
+
+func (q *Queries) UpdateClaimTask(ctx context.Context, arg UpdateClaimTaskParams) (ClaimTask, error) {
+	row := q.db.QueryRow(ctx, updateClaimTask,
+		arg.Name,
+		arg.Description,
+		arg.IconPath,
+		arg.MinVipLevel,
+		arg.Reward,
+		arg.Requirement,
+		arg.Flow,
+		arg.Link,
+		arg.DisplayOrder,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.ID,
+	)
+	var i ClaimTask
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IconPath,
+		&i.MinVipLevel,
+		&i.Reward,
+		&i.Requirement,
+		&i.Flow,
+		&i.Link,
+		&i.DisplayOrder,
+		&i.Enabled,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updatePeriodicTask = `-- name: UpdatePeriodicTask :one
+UPDATE periodic_tasks
+SET name          = COALESCE($1, name),
+    description   = COALESCE($2, description),
+    icon_path     = COALESCE($3, icon_path),
+    target        = COALESCE($4, target),
+    reward        = COALESCE($5, reward),
+    display_order = COALESCE($6, display_order),
+    enabled       = COALESCE($7, enabled),
+    updated_at    = now()
+WHERE id = $8 AND deleted_at IS NULL
+RETURNING id, name, description, icon_path, category, period, target, reward, display_order, enabled, deleted_at, created_at, updated_at
+`
+
+type UpdatePeriodicTaskParams struct {
+	Name         *string
+	Description  *string
+	IconPath     *string
+	Target       *int32
+	Reward       *int64
+	DisplayOrder *int32
+	Enabled      *bool
+	ID           int64
+}
+
+// 部分更新：nil 字段不动。
+func (q *Queries) UpdatePeriodicTask(ctx context.Context, arg UpdatePeriodicTaskParams) (PeriodicTask, error) {
+	row := q.db.QueryRow(ctx, updatePeriodicTask,
+		arg.Name,
+		arg.Description,
+		arg.IconPath,
+		arg.Target,
+		arg.Reward,
+		arg.DisplayOrder,
+		arg.Enabled,
+		arg.ID,
+	)
+	var i PeriodicTask
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.IconPath,
+		&i.Category,
+		&i.Period,
+		&i.Target,
+		&i.Reward,
+		&i.DisplayOrder,
+		&i.Enabled,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertTaskProgress = `-- name: UpsertTaskProgress :one
@@ -639,4 +999,15 @@ func (q *Queries) UpsertTaskProgress(ctx context.Context, arg UpsertTaskProgress
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const voidInflightClaims = `-- name: VoidInflightClaims :exec
+UPDATE task_claims SET status = 'expired', updated_at = now()
+WHERE task_id = $1 AND status IN ('claimed', 'submitted', 'rejected')
+`
+
+// 软删定义时作废全部未终态在途记录（已发奖终态不动）。
+func (q *Queries) VoidInflightClaims(ctx context.Context, taskID int64) error {
+	_, err := q.db.Exec(ctx, voidInflightClaims, taskID)
+	return err
 }
