@@ -51,10 +51,10 @@
 
 ## 四、对 Go 重写的直接影响（喂给 #36 定稿：观看奖励设计）
 
-1. **watch_reward 不是独立奖励，它就是 watch-video 任务。** Go 骨架预留的"观看奖励事件 ref = `plays.id`"应理解为**喂任务进度的事件**，而非"每有效播放直接发一笔 watch_reward 流水"。这与旧版实时行为一致。#36 需拍板：是延续"有效播放→喂 watch 任务→发 TASK_REWARD"，还是引入独立的 per-play 直发（旧版无此行为，属新增）。
-2. **基线流水 10 类是否保留 `watch_reward` 独立类型？** 旧版该类型发放层已死。若 Go 也走"喂任务"路线，则 `watch_reward` 流水类型无产生源 —— 要么删除该类型（推荐，符合 feature-checklist"旧 bug/死代码不复刻"精神），要么明确保留为 M5 新增的 per-play 直发能力（需产品决策，属行为差异）。
-3. **`diamond_per_like` / `diamond_per_comment` 两列**：确认可从 Go schema 基线**删除**（旧版死列，无发放链路）。清除对应 Fog 项。
-4. **VIP 倍率作用点**：旧版对**任务基础奖励**乘 `multiplier`（`floor(base × mult)`，取执行者本人 VIP 档，缺省 ×1）。Go 已定 `floor(base × bp / 10000)` 整数万分比等价 —— 语义一致，作用对象是任务奖励。
+1. **watch_reward 不是独立奖励，它就是 watch-video 任务。** Go 骨架预留的"观看奖励事件 ref = `plays.id`"应理解为**喂任务进度的事件**，而非"每有效播放直接发一笔 watch_reward 流水"。这与旧版实时行为一致。#36 需拍板：是延续"有效播放→喂 watch 任务→发任务奖励流水"，还是引入独立的 per-play 直发（旧版无此行为，属新增）。
+2. **Go 基线现状：`watch_reward` 是被保留的独立流水类型（`ref_id = plays.id`），但旧版该类型的发放层已死。** 这与 `docs/schema.md` 里 `content_reward` 的处理如出一辙——"类型保留以承接迁移数据；发放链路旧版即不存在，不建"。故 #36 的最省决策是**沿用 `content_reward` 同款模式**：保留 `watch_reward` 类型承接迁移，但不建 per-play 直发链路，观看奖励实体 = watch-video 周期任务。若要真发 per-play 直发，则属 M5 新增能力（需产品决策，属行为差异）。
+3. **`diamond_per_like` / `diamond_per_comment`（及 `diamond_per_view`/`valid_view`）四列**：旧版死列，无发放链路。**Go schema 基线已正确未纳入**（`vip_level_configs` 仅 `reward_multiplier_bp`）—— 无需动作，本核对确认该设计正确，对应 Fog 项可清除。
+4. **VIP 倍率作用点**：旧版对**任务基础奖励**乘 `multiplier`（`floor(base × mult)`，取执行者本人 VIP 档，缺省 ×1）。Go 已定 `floor(base × reward_multiplier_bp / 10000)` 整数万分比等价 —— 语义一致，作用对象是任务奖励。
 5. **有效播放去重口径**：旧版 = 同 IP×同视频 24h（Redis）。Go 无 Redis，须用 Postgres 表达等价去重（`plays` 唯一约束 / 时间窗判定）—— 归入任务域/视频域实现细节，非本票范围。
 
 ## 五、遗留/移交
