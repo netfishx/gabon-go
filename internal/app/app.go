@@ -16,6 +16,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/api"
 	"github.com/netfishx/gabon-go/internal/auth"
 	"github.com/netfishx/gabon-go/internal/config"
+	"github.com/netfishx/gabon-go/internal/cron"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/report"
 	"github.com/netfishx/gabon-go/internal/storage"
@@ -35,15 +36,21 @@ type App struct {
 	Handler http.Handler
 
 	transcoder *transcode.Worker
+	scheduler  *cron.Scheduler
 }
 
-// Start 启动后台组件（转码 worker 池：恢复超时任务 + 拉起轮询）。
+// Start 启动后台组件（转码 worker 池 + cron 调度器；后者启动即跑一次做幂等 catch-up）。
 func (a *App) Start(ctx context.Context) error {
-	return a.transcoder.Start(ctx)
+	if err := a.transcoder.Start(ctx); err != nil {
+		return err
+	}
+	a.scheduler.Start(ctx)
+	return nil
 }
 
-// Stop 停止后台组件并等待在途任务退出。
+// Stop 停止后台组件并等待在途任务退出（逆序：先停调度再停 worker）。
 func (a *App) Stop() {
+	a.scheduler.Stop()
 	a.transcoder.Stop()
 }
 
@@ -104,7 +111,22 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		JobTimeout:  cfg.TranscodeTimeout,
 	})
 
-	return &App{Handler: r, transcoder: worker}, nil
+	scheduler := cron.New(logger)
+	// 限时任务过期每 5 分钟（M5 唯一 job；M7 周/月榜复用同基建）
+	if err := scheduler.Register(cron.Job{
+		Name: "expire_claims", Spec: "*/5 * * * *",
+		Run: func(ctx context.Context) error {
+			n, err := tasks.ExpireClaims(ctx)
+			if err == nil && n > 0 {
+				logger.Info("expired claim tasks", "count", n)
+			}
+			return err
+		},
+	}); err != nil {
+		return nil, err
+	}
+
+	return &App{Handler: r, transcoder: worker, scheduler: scheduler}, nil
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

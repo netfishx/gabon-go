@@ -34,6 +34,22 @@ func (q *Queries) ApproveTaskClaim(ctx context.Context, arg ApproveTaskClaimPara
 	return customer_id, err
 }
 
+const expireClaims = `-- name: ExpireClaims :execrows
+UPDATE task_claims
+SET status = 'expired', updated_at = now()
+WHERE expires_at IS NOT NULL AND expires_at < now()
+  AND status IN ('claimed', 'rejected')
+`
+
+// 过期作废 {claimed, rejected}：待审核与已发奖豁免（cron 每 5 分钟）。
+func (q *Queries) ExpireClaims(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, expireClaims)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getClaimTask = `-- name: GetClaimTask :one
 SELECT id, name, description, icon_path, min_vip_level, reward, requirement, flow, link, display_order, enabled, starts_at, ends_at, deleted_at, created_at, updated_at FROM claim_tasks WHERE id = $1 AND deleted_at IS NULL
 `
@@ -58,6 +74,56 @@ func (q *Queries) GetClaimTask(ctx context.Context, id int64) (ClaimTask, error)
 		&i.DeletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getClaimTaskForCustomer = `-- name: GetClaimTaskForCustomer :one
+SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
+       ct.requirement, ct.flow, ct.link, ct.starts_at, ct.ends_at, ct.deleted_at,
+       tc.status AS claim_status
+FROM claim_tasks ct
+LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
+WHERE ct.id = $2
+`
+
+type GetClaimTaskForCustomerParams struct {
+	CustomerID int64
+	ID         int64
+}
+
+type GetClaimTaskForCustomerRow struct {
+	ID          int64
+	Name        string
+	IconPath    *string
+	MinVipLevel int32
+	Reward      int64
+	Requirement *string
+	Flow        *string
+	Link        *string
+	StartsAt    pgtype.Timestamptz
+	EndsAt      pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+	ClaimStatus NullClaimStatus
+}
+
+// 任务详情 + 查看者领取状态（软删任务仍可看历史详情）。
+func (q *Queries) GetClaimTaskForCustomer(ctx context.Context, arg GetClaimTaskForCustomerParams) (GetClaimTaskForCustomerRow, error) {
+	row := q.db.QueryRow(ctx, getClaimTaskForCustomer, arg.CustomerID, arg.ID)
+	var i GetClaimTaskForCustomerRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.IconPath,
+		&i.MinVipLevel,
+		&i.Reward,
+		&i.Requirement,
+		&i.Flow,
+		&i.Link,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.DeletedAt,
+		&i.ClaimStatus,
 	)
 	return i, err
 }
@@ -169,6 +235,63 @@ func (q *Queries) InsertTaskClaim(ctx context.Context, arg InsertTaskClaimParams
 	return i, err
 }
 
+const listClaimTasksForCustomer = `-- name: ListClaimTasksForCustomer :many
+SELECT ct.id, ct.name, ct.icon_path, ct.min_vip_level, ct.reward,
+       ct.requirement, ct.flow, ct.link, ct.starts_at, ct.ends_at,
+       tc.status AS claim_status
+FROM claim_tasks ct
+LEFT JOIN task_claims tc ON tc.task_id = ct.id AND tc.customer_id = $1
+WHERE ct.enabled AND ct.deleted_at IS NULL
+ORDER BY ct.display_order, ct.id
+`
+
+type ListClaimTasksForCustomerRow struct {
+	ID          int64
+	Name        string
+	IconPath    *string
+	MinVipLevel int32
+	Reward      int64
+	Requirement *string
+	Flow        *string
+	Link        *string
+	StartsAt    pgtype.Timestamptz
+	EndsAt      pgtype.Timestamptz
+	ClaimStatus NullClaimStatus
+}
+
+// 客户面可领取列表：启用未删的全部限时任务 + 查看者领取状态（三态分组在应用层算）。
+func (q *Queries) ListClaimTasksForCustomer(ctx context.Context, customerID int64) ([]ListClaimTasksForCustomerRow, error) {
+	rows, err := q.db.Query(ctx, listClaimTasksForCustomer, customerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListClaimTasksForCustomerRow
+	for rows.Next() {
+		var i ListClaimTasksForCustomerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.IconPath,
+			&i.MinVipLevel,
+			&i.Reward,
+			&i.Requirement,
+			&i.Flow,
+			&i.Link,
+			&i.StartsAt,
+			&i.EndsAt,
+			&i.ClaimStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEnabledPeriodicTasks = `-- name: ListEnabledPeriodicTasks :many
 SELECT id, name, description, icon_path, category, period, target, reward, display_order, enabled, deleted_at, created_at, updated_at FROM periodic_tasks
 WHERE enabled AND deleted_at IS NULL
@@ -238,6 +361,61 @@ func (q *Queries) ListEnabledPeriodicTasksByCategory(ctx context.Context, catego
 			&i.DeletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMyClaims = `-- name: ListMyClaims :many
+SELECT tc.id, tc.status, tc.reward_base, tc.reward_granted, tc.review_remark,
+       tc.claimed_at, tc.rewarded_at, ct.name AS task_name
+FROM task_claims tc
+JOIN claim_tasks ct ON ct.id = tc.task_id
+WHERE tc.customer_id = $1 AND tc.status::text = ANY($2::text[])
+ORDER BY tc.id DESC
+`
+
+type ListMyClaimsParams struct {
+	CustomerID int64
+	Statuses   []string
+}
+
+type ListMyClaimsRow struct {
+	ID            int64
+	Status        ClaimStatus
+	RewardBase    int64
+	RewardGranted *int64
+	ReviewRemark  *string
+	ClaimedAt     pgtype.Timestamptz
+	RewardedAt    pgtype.Timestamptz
+	TaskName      string
+}
+
+// 我的领取记录：进行中 {claimed,submitted,rejected} / 已完成 {rewarded,expired}（id 降序）。
+func (q *Queries) ListMyClaims(ctx context.Context, arg ListMyClaimsParams) ([]ListMyClaimsRow, error) {
+	rows, err := q.db.Query(ctx, listMyClaims, arg.CustomerID, arg.Statuses)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMyClaimsRow
+	for rows.Next() {
+		var i ListMyClaimsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.RewardBase,
+			&i.RewardGranted,
+			&i.ReviewRemark,
+			&i.ClaimedAt,
+			&i.RewardedAt,
+			&i.TaskName,
 		); err != nil {
 			return nil, err
 		}
