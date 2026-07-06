@@ -235,7 +235,9 @@ activity_reward_configs  id, kind activity_reward_kind, threshold int, reward bi
 ```
 vip_level_configs  level int PK (0–3), name, price bigint,
                    reward_multiplier_bp int,        -- 10000 = 1 倍
-                   invite_reward_cap bigint, updated_at
+                   invite_reward_cap bigint,
+                   upload_video_limit int,          -- 发布作品上限，≤0 不限（M5 复刻旧版，00015 迁移加列）
+                   updated_at
 vip_purchases      id, customer_id, from_level, to_level, price bigint, created_at
 ```
 

@@ -41,14 +41,15 @@ func TestConcurrentPurchaseExactlyOnce(t *testing.T) {
 	wallets := wallet.NewService(pool)
 	svc := NewService(pool, wallets)
 
-	// 经账本充值播种初始余额（只够买一次银牌），保持流水与钱包一致以便对账断言
+	const workers = 8
+	// 播种足额（够买 workers 次银牌），使并发隔离的唯一防线是 CAS 而非余额稀缺——
+	// 否则删掉 CAS 也会因余额不足挡下第二笔，测不出 CAS 回归
 	if err := wallets.Credit(ctx, wallet.CreditParams{
-		CustomerID: customerID, Type: db.TransactionTypeRecharge, Amount: 99900,
+		CustomerID: customerID, Type: db.TransactionTypeRecharge, Amount: 99900 * workers,
 	}); err != nil {
 		t.Fatalf("seed balance: %v", err)
 	}
 
-	const workers = 8
 	var success atomic.Int64
 	var wg sync.WaitGroup
 	start := make(chan struct{})
@@ -77,8 +78,8 @@ func TestConcurrentPurchaseExactlyOnce(t *testing.T) {
 	if level != 2 {
 		t.Errorf("vip_level = %d, want 2", level)
 	}
-	if available != 0 {
-		t.Errorf("available = %d, want 0 (exactly one full-price debit)", available)
+	if available != 99900*(workers-1) {
+		t.Errorf("available = %d, want %d (exactly one full-price debit)", available, 99900*(workers-1))
 	}
 	if purchases != 1 {
 		t.Errorf("vip_purchases = %d, want exactly 1", purchases)

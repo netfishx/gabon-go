@@ -108,14 +108,72 @@ func TestVipLevelConfigs(t *testing.T) {
 	if len(items) != 4 {
 		t.Fatalf("vip levels = %d, want 4", len(items))
 	}
-	// 金卡（level 3）价 299900、发布上限 100
+	// 金卡（level 3）价 299900、倍率 16000bp、发布上限 100、邀请上限 100
 	gold, _ := items[3].(map[string]any)
 	if got, _ := gold["price"].(float64); int64(got) != 299900 {
 		t.Errorf("gold price = %v, want 299900", gold["price"])
 	}
+	if got, _ := gold["reward_multiplier_bp"].(float64); int(got) != 16000 {
+		t.Errorf("gold reward_multiplier_bp = %v, want 16000", gold["reward_multiplier_bp"])
+	}
 	if got, _ := gold["upload_video_limit"].(float64); int(got) != 100 {
 		t.Errorf("gold upload_video_limit = %v, want 100", gold["upload_video_limit"])
 	}
+	if got, _ := gold["invite_reward_cap"].(float64); int(got) != 100 {
+		t.Errorf("gold invite_reward_cap = %v, want 100", gold["invite_reward_cap"])
+	}
+}
+
+func TestVipUploadLimitReleasedByDelete(t *testing.T) {
+	// 通过真实"审核发布 6 条 → 达上限拒 → 删一条 → 可再传"闭环验证删作品释放名额
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	cid := customerIDOf(t, username)
+	adminToken := loginAdmin(t)
+
+	// 审核发布 6 条（普通档上限），每条走 stage→approve 使 video_count+1
+	var firstPublicID string
+	for i := range 6 {
+		pubID, _ := stagePendingVideo(t, username)
+		if i == 0 {
+			firstPublicID = pubID
+		}
+		if resp, _ := postJSON(t, "/admin/v1/videos/"+pubID+"/approve", nil, adminToken); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("approve %d failed", i)
+		}
+	}
+	if got := videoCountOf(t, cid); got != 6 {
+		t.Fatalf("video_count = %d, want 6", got)
+	}
+
+	// 达上限：第 7 条 confirm 拒
+	path := createUpload(t, token, []byte("v7"))
+	if resp, _ := postJSON(t, "/api/v1/videos", map[string]any{"storage_path": path, "title": "第七"}, token); resp.StatusCode != http.StatusConflict {
+		t.Fatalf("7th confirm should be 409")
+	}
+
+	// 删一条已发布作品（真实 DELETE 端点）→ video_count 回退 → 名额释放
+	if resp, _ := doJSON(t, http.MethodDelete, "/api/v1/videos/"+firstPublicID, token, nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete published video failed")
+	}
+	if got := videoCountOf(t, cid); got != 5 {
+		t.Fatalf("video_count after delete = %d, want 5", got)
+	}
+	path2 := createUpload(t, token, []byte("v6b"))
+	if resp, body := postJSON(t, "/api/v1/videos", map[string]any{"storage_path": path2, "title": "补一条"}, token); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload after delete: status = %d, body = %v", resp.StatusCode, body)
+	}
+}
+
+func videoCountOf(t *testing.T, customerID int64) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT video_count FROM customers WHERE id = $1`, customerID).Scan(&n); err != nil {
+		t.Fatalf("query video_count: %v", err)
+	}
+	return n
 }
 
 func TestVipUploadLimit(t *testing.T) {

@@ -30,16 +30,16 @@ func NewService(pool *pgxpool.Pool, wallets *wallet.Service) *Service {
 // Purchase 购买目标 VIP 档：全价扣钻 + 只升级 CAS + 落购买记录 + 流水，同一事务原子完成。
 // 降级/平级/并发重复由 CAS 拦截（0 行返冲突）；余额不足由 DebitTx 拦截并整体回滚。
 func (s *Service) Purchase(ctx context.Context, customerID int64, toLevel int32) error {
-	cfg, err := s.q.GetVipLevelConfig(ctx, toLevel)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return apierr.InvalidArgument("unknown vip level")
-	}
-	if err != nil {
-		return fmt.Errorf("get vip config: %w", err)
-	}
-
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
+		// 价格在事务内读，避免 TOCTOU：成交价与扣款额取同一快照
+		cfg, err := q.GetVipLevelConfig(ctx, toLevel)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apierr.InvalidArgument("unknown vip level")
+		}
+		if err != nil {
+			return fmt.Errorf("get vip config: %w", err)
+		}
 		fromLevel, err := q.UpgradeVipLevel(ctx, db.UpgradeVipLevelParams{ID: customerID, ToLevel: toLevel})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return apierr.New(http.StatusConflict, apierr.CodeVipNotUpgrade, "target level is not an upgrade")
@@ -54,7 +54,7 @@ func (s *Service) Purchase(ctx context.Context, customerID int64, toLevel int32)
 			return fmt.Errorf("insert vip purchase: %w", err)
 		}
 		if cfg.Price == 0 {
-			return nil // 免费档（普通会员）无需扣钻
+			return nil // 免费/促销档（price=0）无需扣钻——CAS 已确保是升级
 		}
 		return s.wallets.DebitTx(ctx, tx, wallet.DebitParams{
 			CustomerID: customerID, Type: db.TransactionTypeVipPurchase,
