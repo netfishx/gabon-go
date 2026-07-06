@@ -87,7 +87,9 @@ ORDER BY tc.id
 LIMIT sqlc.arg('row_limit');
 
 -- name: ExpireClaims :execrows
--- 过期作废 {claimed, rejected}：待审核与已发奖豁免（cron 每 5 分钟）。
+-- 时间过期作废 {claimed, rejected}：submitted 豁免（用户已尽义务，积压属运营问题）、rewarded 终态。
+-- 注意与 RewriteInflightExpiry / VoidInflightClaims 的"未终态"集合 {claimed,submitted,rejected} 有意不同：
+-- 时间过期豁免 submitted，而运营动作（改 ends_at 回写、软删作废）纳入 submitted。
 UPDATE task_claims
 SET status = 'expired', updated_at = now()
 WHERE expires_at IS NOT NULL AND expires_at < now()
@@ -122,3 +124,75 @@ FROM task_claims tc
 JOIN claim_tasks ct ON ct.id = tc.task_id
 WHERE tc.customer_id = $1 AND tc.status::text = ANY(sqlc.arg('statuses')::text[])
 ORDER BY tc.id DESC;
+
+-- name: CreatePeriodicTask :one
+INSERT INTO periodic_tasks (name, description, icon_path, category, period, target, reward, display_order, enabled)
+VALUES (sqlc.arg('name'), sqlc.narg('description'), sqlc.narg('icon_path'), sqlc.arg('category'),
+        sqlc.arg('period'), sqlc.arg('target'), sqlc.arg('reward'), sqlc.arg('display_order'), true)
+RETURNING *;
+
+-- name: ListPeriodicTasksAdmin :many
+SELECT * FROM periodic_tasks WHERE deleted_at IS NULL ORDER BY display_order, id;
+
+-- name: UpdatePeriodicTask :one
+-- 部分更新：nil 字段不动。
+UPDATE periodic_tasks
+SET name          = COALESCE(sqlc.narg('name'), name),
+    description   = COALESCE(sqlc.narg('description'), description),
+    icon_path     = COALESCE(sqlc.narg('icon_path'), icon_path),
+    target        = COALESCE(sqlc.narg('target'), target),
+    reward        = COALESCE(sqlc.narg('reward'), reward),
+    display_order = COALESCE(sqlc.narg('display_order'), display_order),
+    enabled       = COALESCE(sqlc.narg('enabled'), enabled),
+    updated_at    = now()
+WHERE id = sqlc.arg('id') AND deleted_at IS NULL
+RETURNING *;
+
+-- name: CreateClaimTask :one
+INSERT INTO claim_tasks (name, description, icon_path, min_vip_level, reward,
+                         requirement, flow, link, display_order, starts_at, ends_at, enabled)
+VALUES (sqlc.arg('name'), sqlc.narg('description'), sqlc.narg('icon_path'),
+        sqlc.arg('min_vip_level'), sqlc.arg('reward'),
+        sqlc.narg('requirement'), sqlc.narg('flow'), sqlc.narg('link'),
+        sqlc.arg('display_order'), sqlc.narg('starts_at'), sqlc.narg('ends_at'), true)
+RETURNING *;
+
+-- name: ListClaimTasksAdmin :many
+SELECT * FROM claim_tasks WHERE deleted_at IS NULL ORDER BY display_order, id;
+
+-- name: UpdateClaimTask :one
+UPDATE claim_tasks
+SET name          = COALESCE(sqlc.narg('name'), name),
+    description   = COALESCE(sqlc.narg('description'), description),
+    icon_path     = COALESCE(sqlc.narg('icon_path'), icon_path),
+    min_vip_level = COALESCE(sqlc.narg('min_vip_level'), min_vip_level),
+    reward        = COALESCE(sqlc.narg('reward'), reward),
+    requirement   = COALESCE(sqlc.narg('requirement'), requirement),
+    flow          = COALESCE(sqlc.narg('flow'), flow),
+    link          = COALESCE(sqlc.narg('link'), link),
+    display_order = COALESCE(sqlc.narg('display_order'), display_order),
+    starts_at     = COALESCE(sqlc.narg('starts_at'), starts_at),
+    ends_at       = COALESCE(sqlc.narg('ends_at'), ends_at),
+    updated_at    = now()
+WHERE id = sqlc.arg('id') AND deleted_at IS NULL
+RETURNING *;
+
+-- name: RewriteInflightExpiry :exec
+-- 编辑 ends_at 时把未终态在途记录的 expires_at 同步回写（运营语义）。
+-- 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
+UPDATE task_claims SET expires_at = sqlc.arg('expires_at'), updated_at = now()
+WHERE task_id = sqlc.arg('task_id') AND status IN ('claimed', 'submitted', 'rejected');
+
+-- name: SetClaimTaskEnabled :execrows
+UPDATE claim_tasks SET enabled = sqlc.arg('enabled'), updated_at = now()
+WHERE id = sqlc.arg('id') AND deleted_at IS NULL;
+
+-- name: SoftDeleteClaimTask :execrows
+UPDATE claim_tasks SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL;
+
+-- name: VoidInflightClaims :exec
+-- 软删定义时作废全部未终态在途记录（已发奖终态不动）。
+-- 未终态 = {claimed,submitted,rejected}（含 submitted，与 ExpireClaims 的时间过期集合有意不同）。
+UPDATE task_claims SET status = 'expired', updated_at = now()
+WHERE task_id = $1 AND status IN ('claimed', 'submitted', 'rejected');

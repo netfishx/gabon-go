@@ -22,6 +22,21 @@ func claimNotFound() *apierr.Error {
 	return apierr.New(http.StatusNotFound, apierr.CodeClaimTaskNotFound, "claim task not found")
 }
 
+// assertTaskOnline 下架/软删任务冻结流转（提交/审核=通过与驳回/发奖）。
+func (s *Service) assertTaskOnline(ctx context.Context, taskID int64) error {
+	task, err := s.q.GetClaimTask(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline") // 软删即下架
+	}
+	if err != nil {
+		return fmt.Errorf("assert task online: %w", err)
+	}
+	if !task.Enabled {
+		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskOffline, "task is offline")
+	}
+	return nil
+}
+
 // withinClaimWindow 领取窗口判定：starts_at ≤ now < ends_at（空值即该端无界）。
 // 领取校验与列表分组共用同一口径。
 func withinClaimWindow(startsAt, endsAt pgtype.Timestamptz, now time.Time) bool {
@@ -70,7 +85,7 @@ func (s *Service) Claim(ctx context.Context, customerID int64, vipLevel int32, t
 
 // Submit 提交证明：图片归属校验在 api 层（需对象存储）；此处只落库与状态流转。
 // claimed/rejected 可提交（驳回重提覆盖凭证回 submitted）；过期即时拦截。
-// 下架冻结属运营语义（#49），本片不校验任务 enabled。
+// 下架任务冻结提交（运营语义）。
 func (s *Service) Submit(ctx context.Context, customerID, claimID int64, proofText *string, images []string) error {
 	if len(images) < 1 || len(images) > maxProofImages {
 		return apierr.InvalidArgument("proof must have 1-9 images")
@@ -87,6 +102,9 @@ func (s *Service) Submit(ctx context.Context, customerID, claimID int64, proofTe
 	}
 	if claim.ExpiresAt.Valid && !time.Now().In(tz.Shanghai).Before(claim.ExpiresAt.Time) {
 		return apierr.New(http.StatusConflict, apierr.CodeClaimTaskWindowClosed, "claim has expired")
+	}
+	if err := s.assertTaskOnline(ctx, claim.TaskID); err != nil {
+		return err
 	}
 	rows, err := s.q.SubmitTaskClaim(ctx, db.SubmitTaskClaimParams{
 		ID: claimID, CustomerID: customerID, ProofText: proofText, ProofImages: images,
@@ -111,6 +129,9 @@ func (s *Service) Approve(ctx context.Context, adminID, claimID int64) error {
 		}
 		if err != nil {
 			return fmt.Errorf("get claim: %w", err)
+		}
+		if err := s.assertTaskOnline(ctx, claim.TaskID); err != nil {
+			return err
 		}
 		bp, err := q.GetCustomerRewardMultiplierBp(ctx, claim.CustomerID)
 		if err != nil {
@@ -138,10 +159,20 @@ func (s *Service) Approve(ctx context.Context, adminID, claimID int64) error {
 	})
 }
 
-// Reject 驳回：理由必填；submitted→rejected。
+// Reject 驳回：理由必填；submitted→rejected。下架任务冻结驳回（与通过对称，PRD 审核冻结）。
 func (s *Service) Reject(ctx context.Context, adminID, claimID int64, remark string) error {
 	if remark == "" {
 		return apierr.InvalidArgument("reject remark is required")
+	}
+	claim, err := s.q.GetTaskClaim(ctx, claimID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return claimNotFound()
+	}
+	if err != nil {
+		return fmt.Errorf("get claim: %w", err)
+	}
+	if err := s.assertTaskOnline(ctx, claim.TaskID); err != nil {
+		return err
 	}
 	rows, err := s.q.RejectTaskClaim(ctx, db.RejectTaskClaimParams{
 		ID: claimID, ReviewedBy: &adminID, ReviewRemark: &remark,
