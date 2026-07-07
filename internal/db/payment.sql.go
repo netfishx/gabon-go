@@ -266,10 +266,13 @@ func (q *Queries) MarkRechargeSucceeded(ctx context.Context, arg MarkRechargeSuc
 
 const setRechargeProviderInfo = `-- name: SetRechargeProviderInfo :exec
 UPDATE recharge_orders
-SET provider_order_no = $1,
-    provider_status = $2,
+SET provider_order_no = COALESCE(provider_order_no, $1),
+    provider_status = CASE
+        WHEN status = 'pending_payment' THEN $2
+        ELSE provider_status
+    END,
     updated_at = now()
-WHERE id = $3 AND status = 'pending_payment'
+WHERE id = $3
 `
 
 type SetRechargeProviderInfoParams struct {
@@ -278,8 +281,10 @@ type SetRechargeProviderInfoParams struct {
 	ID              int64
 }
 
-// 建单调 Pay 后回填渠道单号/状态。仅在仍 pending_payment 时写——
-// 防快速异步回调抢先落终态后，本回填把过期的 pending provider_status 盖回终态订单（P3）。
+// 建单调 Pay 后回填渠道单号/状态。列级精确处理快速异步回调抢先落终态的竞态（P3）：
+//
+//	provider_order_no：COALESCE 补写——仅在缺失时填、绝不覆盖已有值（渠道单号一次分配、不变）；
+//	provider_status：仅 pending_payment 时写，终态则保留回调已落的状态、不被过期 pending 盖回。
 func (q *Queries) SetRechargeProviderInfo(ctx context.Context, arg SetRechargeProviderInfoParams) error {
 	_, err := q.db.Exec(ctx, setRechargeProviderInfo, arg.ProviderOrderNo, arg.ProviderStatus, arg.ID)
 	return err

@@ -3,15 +3,19 @@ package payment
 import (
 	"context"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/netfishx/gabon-go/internal/db"
 	"github.com/netfishx/gabon-go/internal/testdb"
-	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
-// P3 回归：快速异步回调抢先把订单落终态后，建单流程迟到的 provider 信息回填
-// （SetRechargeProviderInfo）不得把过期的 pending provider_status 盖回终态订单。
-func TestSetProviderInfoSkipsTerminalOrder(t *testing.T) {
+// P3 回归：快速异步回调抢先把订单落终态（此时建单尚未回填 provider_order_no）后，
+// 迟到的 SetRechargeProviderInfo 必须：
+//   - 保留回调已落的 provider_status（不被过期 pending 盖回）；
+//   - 仍补写缺失的 provider_order_no（否则 trace/fallback 少一个渠道单号）。
+func TestSetProviderInfoBackfillsButKeepsTerminalStatus(t *testing.T) {
 	ctx := context.Background()
 	pool, cleanup, err := testdb.Start(ctx)
 	if err != nil {
@@ -26,33 +30,34 @@ func TestSetProviderInfoSkipsTerminalOrder(t *testing.T) {
 	).Scan(&customerID); err != nil {
 		t.Fatalf("stage customer: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO wallets (customer_id) VALUES ($1)`, customerID); err != nil {
-		t.Fatalf("stage wallet: %v", err)
-	}
-
-	registry, err := NewRegistry(NewMockProvider())
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
-	svc := NewService(pool, wallet.NewService(pool), registry, "")
-	order, _, err := svc.CreateRechargeOrder(ctx, customerID, 5000, "mock")
-	if err != nil {
-		t.Fatalf("create recharge order: %v", err)
-	}
 
 	q := db.New(pool)
-	// 回调抢先落终态：succeeded + provider_status='success'。
+	// 建单（尚未调 Pay，故 provider_order_no 为 NULL）——模拟回调抢在 persistPayResult 之前。
+	providerCode := MockProviderCode
+	id, err := q.InsertRechargeOrder(ctx, db.InsertRechargeOrderParams{
+		CustomerID: customerID, Amount: 5000, FiatAmount: 5000, Provider: &providerCode,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("insert order: %v", err)
+	}
+	order, err := q.FinalizeRechargeOrderNo(ctx, id)
+	if err != nil {
+		t.Fatalf("finalize order_no: %v", err)
+	}
+
+	// 快速回调抢先落终态：succeeded + provider_status='success'（回调按 order_no 定位，不设单号）。
 	successStatus := "success"
 	if _, err := q.MarkRechargeSucceeded(ctx, db.MarkRechargeSucceededParams{
-		ID: order.ID, ProviderStatus: &successStatus,
+		ID: id, ProviderStatus: &successStatus,
 	}); err != nil {
 		t.Fatalf("mark succeeded: %v", err)
 	}
 
-	// 建单流程迟到的回填带过期 pending 状态——守卫应使其对终态订单变 no-op。
-	stale, pon := "pending", "MOCK-late"
+	// 迟到的建单回填：带真实单号 + 过期 pending 状态。
+	pon, stale := "MOCK-late", "pending"
 	if err := q.SetRechargeProviderInfo(ctx, db.SetRechargeProviderInfoParams{
-		ID: order.ID, ProviderOrderNo: &pon, ProviderStatus: &stale,
+		ID: id, ProviderOrderNo: &pon, ProviderStatus: &stale,
 	}); err != nil {
 		t.Fatalf("set provider info: %v", err)
 	}
@@ -66,5 +71,8 @@ func TestSetProviderInfoSkipsTerminalOrder(t *testing.T) {
 	}
 	if got.ProviderStatus == nil || *got.ProviderStatus != "success" {
 		t.Fatalf("provider_status = %v, want success (terminal status must not be overwritten)", got.ProviderStatus)
+	}
+	if got.ProviderOrderNo == nil || *got.ProviderOrderNo != "MOCK-late" {
+		t.Fatalf("provider_order_no = %v, want MOCK-late (must still backfill when missing)", got.ProviderOrderNo)
 	}
 }
