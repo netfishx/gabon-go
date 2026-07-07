@@ -269,7 +269,7 @@ UPDATE recharge_orders
 SET provider_order_no = $1,
     provider_status = $2,
     updated_at = now()
-WHERE id = $3
+WHERE id = $3 AND status = 'pending_payment'
 `
 
 type SetRechargeProviderInfoParams struct {
@@ -278,7 +278,8 @@ type SetRechargeProviderInfoParams struct {
 	ID              int64
 }
 
-// 建单调 Pay 后回填渠道单号/状态。
+// 建单调 Pay 后回填渠道单号/状态。仅在仍 pending_payment 时写——
+// 防快速异步回调抢先落终态后，本回填把过期的 pending provider_status 盖回终态订单（P3）。
 func (q *Queries) SetRechargeProviderInfo(ctx context.Context, arg SetRechargeProviderInfoParams) error {
 	_, err := q.db.Exec(ctx, setRechargeProviderInfo, arg.ProviderOrderNo, arg.ProviderStatus, arg.ID)
 	return err

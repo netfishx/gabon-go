@@ -29,12 +29,13 @@ SELECT * FROM recharge_orders
 WHERE provider = sqlc.arg(provider) AND provider_order_no = sqlc.arg(provider_order_no);
 
 -- name: SetRechargeProviderInfo :exec
--- 建单调 Pay 后回填渠道单号/状态。
+-- 建单调 Pay 后回填渠道单号/状态。仅在仍 pending_payment 时写——
+-- 防快速异步回调抢先落终态后，本回填把过期的 pending provider_status 盖回终态订单（P3）。
 UPDATE recharge_orders
 SET provider_order_no = sqlc.narg(provider_order_no),
     provider_status = sqlc.narg(provider_status),
     updated_at = now()
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id) AND status = 'pending_payment';
 
 -- name: MarkRechargeSucceeded :one
 -- 到账 CAS（幂等第二闸）：仅 pending_payment → succeeded；0 行 = 已终态，调用方短路。

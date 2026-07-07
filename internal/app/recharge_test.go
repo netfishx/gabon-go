@@ -25,6 +25,21 @@ func postForm(t *testing.T, path string, form url.Values) (*http.Response, strin
 	return resp, string(raw)
 }
 
+// getCallback 以 GET+query 发回调（stpay 一类 GET 渠道的传输方式）。
+func getCallback(t *testing.T, path string, q url.Values) (*http.Response, string) {
+	t.Helper()
+	resp, err := http.Get(testServer.URL + path + "?" + q.Encode())
+	if err != nil {
+		t.Fatalf("get callback %s: %v", path, err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return resp, string(raw)
+}
+
 // createRechargeOrder 建单并返回 order_no。
 func createRechargeOrder(t *testing.T, token string, fiatAmount int64) string {
 	t.Helper()
@@ -134,6 +149,33 @@ func TestRechargeCallbackCreditsThenIdempotent(t *testing.T) {
 		t.Fatalf("recharge tx count after duplicate = %d, want 1", count)
 	}
 	assertAuditIdentity(t, cid)
+}
+
+func TestRechargeCallbackViaGetQuery(t *testing.T) {
+	// GET/query 传输的回调（如 stpay #69）也能到账：路由注册 GET，handler 读 Query。
+	username := uniqueUsername(t)
+	registerCustomer(t, username, "")
+	token := loginCustomer(t, username, "secret123")
+	cid := customerIDOf(t, username)
+
+	const fiat = 7000
+	orderNo := createRechargeOrder(t, token, fiat)
+	q := url.Values{
+		"order_no":          {orderNo},
+		"provider_order_no": {"MOCK-" + orderNo},
+		"status":            {"success"},
+		"amount":            {strconv.FormatInt(fiat, 10)},
+	}
+	resp, body := getCallback(t, "/callback/mock/pay", q)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "success") {
+		t.Fatalf("GET callback: status = %d, body = %q", resp.StatusCode, body)
+	}
+	if got := availableOf(t, token); got != fiat {
+		t.Fatalf("available after GET callback = %d, want %d", got, fiat)
+	}
+	if count, _ := rechargeTxStats(t, cid); count != 1 {
+		t.Fatalf("recharge tx count = %d, want 1", count)
+	}
 }
 
 func TestRechargeCallbackAmountMismatchRejected(t *testing.T) {

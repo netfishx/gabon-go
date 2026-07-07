@@ -19,7 +19,10 @@ const callbackMaxBody = 1 << 20 // 1 MiB
 // 身份完全靠 Provider.ParseCallback 验签，见 PRD #63。
 func (h *Handler) CallbackRoutes() chi.Router {
 	r := chi.NewRouter()
+	// POST（表单/JSON 渠道）与 GET（query 渠道，如 stpay #69）都可能是回调传输方式；
+	// handler 同时读 Body/Form/Query，Provider.ParseCallback 各取所需。
 	r.Post("/{provider}/pay", h.handlePayCallback)
+	r.Get("/{provider}/pay", h.handlePayCallback)
 	return r
 }
 

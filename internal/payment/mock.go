@@ -56,18 +56,25 @@ func (mockProvider) Withdraw(_ context.Context, cmd WithdrawCommand) (*WithdrawR
 //   - valid=false → Valid=false（模拟坏签，Service 落 event 后 ack fail）。
 //   - status: success / failed / 其它=pending。
 func (mockProvider) ParseCallback(req *CallbackRequest) (*CallbackResult, error) {
-	form := req.Form
-	orderNo := form.Get("order_no")
+	// 兼容表单渠道（POST body → Form）与 GET/query 渠道（→ Query）：Form 优先，Query 兜底。
+	get := func(k string) string {
+		if v := req.Form.Get(k); v != "" {
+			return v
+		}
+		return req.Query.Get(k)
+	}
+
+	orderNo := get("order_no")
 	if orderNo == "" {
 		return nil, fmt.Errorf("mock callback: missing order_no")
 	}
-	amount, err := strconv.ParseInt(form.Get("amount"), 10, 64)
+	amount, err := strconv.ParseInt(get("amount"), 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("mock callback: bad amount %q: %w", form.Get("amount"), err)
+		return nil, fmt.Errorf("mock callback: bad amount %q: %w", get("amount"), err)
 	}
 
 	outcome := OutcomePending
-	switch form.Get("status") {
+	switch get("status") {
 	case "success":
 		outcome = OutcomeSuccess
 	case "failed":
@@ -75,19 +82,23 @@ func (mockProvider) ParseCallback(req *CallbackRequest) (*CallbackResult, error)
 	}
 
 	// 落库用收到的原始报文（Service.jsonPayload 归一为合法 jsonb），忠实留痕作纠纷佐证；
-	// 直连 Form（无 HTTP body）时退化为 form 编码。
+	// 直连（无 HTTP body）时退化为 Form 或 Query 编码。
 	raw := req.Body
 	if len(raw) == 0 {
-		raw = []byte(form.Encode())
+		if enc := req.Form.Encode(); enc != "" {
+			raw = []byte(enc)
+		} else {
+			raw = []byte(req.Query.Encode())
+		}
 	}
 
 	return &CallbackResult{
-		Valid:           form.Get("valid") != "false",
+		Valid:           get("valid") != "false",
 		OrderNo:         orderNo,
-		ProviderOrderNo: form.Get("provider_order_no"),
+		ProviderOrderNo: get("provider_order_no"),
 		FiatAmount:      amount,
 		Outcome:         outcome,
-		ProviderStatus:  form.Get("status"),
+		ProviderStatus:  get("status"),
 		AckSuccess:      Ack{ContentType: "text/plain; charset=utf-8", Body: []byte("success")},
 		AckFailure:      Ack{ContentType: "text/plain; charset=utf-8", Body: []byte("fail")},
 		RawPayload:      raw,
