@@ -29,16 +29,16 @@
 
 ## 当前状态与路线图
 
-设计与旧版核对**全部完成**，代码零行。按里程碑落地，每个里程碑走 `feat/mN-*` 分支 + PR，以对应功能项的 E2E 通过为完成标准：
+按里程碑落地，每个里程碑走 `feat/mN-*` 分支 + PR，以对应功能项的 E2E 通过为完成标准。**M1–M5 已合并**：
 
 | 里程碑 | 内容 | 状态 |
 |--------|------|------|
 | M1 | 骨架 + 全量迁移 + 双主体认证 + 注册登录 | ✅ [PR #2](https://github.com/netfishx/gabon-go/pull/2) |
 | M2 | 钱包 + 流水（纯账本） | ✅ [PR #9](https://github.com/netfishx/gabon-go/pull/9) |
 | M3 | 视频管线：上传 → 转码 → 审核 → Feed | ✅ [PR #19](https://github.com/netfishx/gabon-go/pull/19) |
-| M4 | 邀请裂变 + 有效用户判定 | 待启动 |
-| M5 | 奖励族：任务 + 签到 + VIP + 广告 | 待启动 |
-| M6 | 充值提现 + 支付渠道 | 待启动 |
+| M4 | 邀请裂变 + 有效用户判定 | ✅ [PR #27](https://github.com/netfishx/gabon-go/pull/27) |
+| M5 | 奖励族：通用上传 + 任务 + 签到 + VIP + 广告（cron 基建接入） | ✅ PR #44 / #50–#53 / #58 / #59 / #60 |
+| M6 | 充值提现 + 支付渠道（Provider 四渠道 + payment_events） | 待启动（[前置核对已完成](./docs/research/m6-recharge-timeout.md)） |
 | M7 | 关注 + 榜单 + 报表 + 后台收尾 | 待启动 |
 
 ## 开发命令
