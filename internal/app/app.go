@@ -19,6 +19,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/cron"
 	"github.com/netfishx/gabon-go/internal/customer"
+	"github.com/netfishx/gabon-go/internal/payment"
 	"github.com/netfishx/gabon-go/internal/report"
 	"github.com/netfishx/gabon-go/internal/signin"
 	"github.com/netfishx/gabon-go/internal/storage"
@@ -83,6 +84,18 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	signIns := signin.NewService(pool, wallets)
 	vips := vip.NewService(pool, wallets)
 	ads := ad.NewService(pool)
+	// 支付渠道注册表：本片仅内置 mock，且**仅在显式开关下**注册（真实三渠道归 #69）。
+	// mock 回调不验签，绝不能在生产启用——否则任意客户可经 /callback/mock/pay 自助刷钱。
+	var providers []payment.Provider
+	if cfg.PaymentEnableMock {
+		logger.Warn("payment mock provider ENABLED — dev/test only, MUST be disabled in production")
+		providers = append(providers, payment.NewMockProvider())
+	}
+	registry, err := payment.NewRegistry(providers...)
+	if err != nil {
+		return nil, err
+	}
+	payments := payment.NewService(pool, wallets, registry, cfg.CallbackBaseURL)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -100,10 +113,13 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		SignIns:   signIns,
 		Vips:      vips,
 		Ads:       ads,
+		Payments:  payments,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
+	// 支付回调：/api/v1 之外、无 JWT，身份靠验签（PRD #63）。
+	r.Mount("/callback", apiHandler.CallbackRoutes())
 
 	adminHandler := &admin.Handler{
 		Admins: admin.NewService(pool),

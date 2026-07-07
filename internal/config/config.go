@@ -28,6 +28,14 @@ type Config struct {
 	// CDNBaseURL 播放地址基础域名（如 https://cdn.example.com），回源对象存储
 	CDNBaseURL string
 
+	// CallbackBaseURL 支付回调对外基础域名（拼 notify_url = base + /callback/{provider}/pay）。
+	// 可选：真实渠道启用时须配（#69）；mock 渠道不依赖，故不做 fail-fast。
+	CallbackBaseURL string
+
+	// PaymentEnableMock 是否注册内置 mock 支付渠道。**仅供 dev/test**：mock 回调不验签，
+	// 一旦启用，任意登录客户可经 /callback/mock/pay 自助充值刷钱。默认 false，生产绝不启用。
+	PaymentEnableMock bool
+
 	// 转码 worker 池（ADR-0003）
 	TranscodeWorkers int
 	TranscodeTimeout time.Duration
@@ -36,17 +44,19 @@ type Config struct {
 // Load 从环境变量装载配置，必填项缺失立即报错（fail fast）。
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		JWTSecret:     []byte(os.Getenv("JWT_SECRET")),
-		HTTPAddr:      os.Getenv("HTTP_ADDR"),
-		AdminUsername: os.Getenv("ADMIN_USERNAME"),
-		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
-		S3Endpoint:    os.Getenv("S3_ENDPOINT"),
-		S3AccessKey:   os.Getenv("S3_ACCESS_KEY"),
-		S3SecretKey:   os.Getenv("S3_SECRET_KEY"),
-		S3Bucket:      os.Getenv("S3_BUCKET"),
-		S3UseSSL:      os.Getenv("S3_USE_SSL") == "true",
-		CDNBaseURL:    os.Getenv("CDN_BASE_URL"),
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		JWTSecret:         []byte(os.Getenv("JWT_SECRET")),
+		HTTPAddr:          os.Getenv("HTTP_ADDR"),
+		AdminUsername:     os.Getenv("ADMIN_USERNAME"),
+		AdminPassword:     os.Getenv("ADMIN_PASSWORD"),
+		S3Endpoint:        os.Getenv("S3_ENDPOINT"),
+		S3AccessKey:       os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:       os.Getenv("S3_SECRET_KEY"),
+		S3Bucket:          os.Getenv("S3_BUCKET"),
+		S3UseSSL:          os.Getenv("S3_USE_SSL") == "true",
+		CDNBaseURL:        os.Getenv("CDN_BASE_URL"),
+		CallbackBaseURL:   os.Getenv("CALLBACK_BASE_URL"),
+		PaymentEnableMock: os.Getenv("PAYMENT_ENABLE_MOCK") == "true",
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":8080"
