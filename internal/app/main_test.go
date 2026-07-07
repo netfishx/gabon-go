@@ -68,6 +68,8 @@ func run(m *testing.M) (int, error) {
 		S3Bucket:      "gabon-test",
 		CDNBaseURL:    "http://" + mio.Endpoint + "/gabon-test",
 
+		PaymentEnableMock: true, // E2E 全链路需要 mock 渠道；生产默认 false
+
 		TranscodeWorkers: 2,
 		TranscodeTimeout: 60 * time.Second,
 	}

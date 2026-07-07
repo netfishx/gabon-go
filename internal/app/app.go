@@ -84,8 +84,14 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	signIns := signin.NewService(pool, wallets)
 	vips := vip.NewService(pool, wallets)
 	ads := ad.NewService(pool)
-	// 支付渠道注册表：本片仅内置 mock（真实三渠道移植+默认停用归 #69）。
-	registry, err := payment.NewRegistry(payment.NewMockProvider())
+	// 支付渠道注册表：本片仅内置 mock，且**仅在显式开关下**注册（真实三渠道归 #69）。
+	// mock 回调不验签，绝不能在生产启用——否则任意客户可经 /callback/mock/pay 自助刷钱。
+	var providers []payment.Provider
+	if cfg.PaymentEnableMock {
+		logger.Warn("payment mock provider ENABLED — dev/test only, MUST be disabled in production")
+		providers = append(providers, payment.NewMockProvider())
+	}
+	registry, err := payment.NewRegistry(providers...)
 	if err != nil {
 		return nil, err
 	}
