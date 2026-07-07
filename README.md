@@ -25,7 +25,7 @@
 2. [docs/adr/](./docs/adr/) — 六个关键决策：Go 换栈、候选替代品定位、ffmpeg 自建转码、单 Postgres 数据层、云服务约束、流水纯账本
 3. [docs/feature-checklist.md](./docs/feature-checklist.md) — **验收基准**：A–M 全量功能清单 + 明确不复刻的旧行为差异
 4. [docs/skeleton.md](./docs/skeleton.md) — 项目骨架与横切约定 + 里程碑序列与工程流程
-5. [docs/schema.md](./docs/schema.md) — 28 表 schema 设计基线
+5. [docs/schema.md](./docs/schema.md) — schema 设计基线
 
 ## 当前状态与路线图
 
@@ -38,7 +38,7 @@
 | M3 | 视频管线：上传 → 转码 → 审核 → Feed | ✅ [PR #19](https://github.com/netfishx/gabon-go/pull/19) |
 | M4 | 邀请裂变 + 有效用户判定 | ✅ [PR #27](https://github.com/netfishx/gabon-go/pull/27) |
 | M5 | 奖励族：通用上传 + 任务 + 签到 + VIP + 广告（cron 基建接入） | ✅ PR #44 / #50–#53 / #58 / #59 / #60 |
-| M6 | 充值提现 + 支付渠道（Provider 四渠道 + payment_events） | 待启动（[前置核对已完成](./docs/research/m6-recharge-timeout.md)） |
+| M6 | 充值提现 + 支付渠道（Provider 四渠道 + payment_events） | 🚧 切片就绪（[PRD #63](https://github.com/netfishx/gabon-go/issues/63) + #64–#69，[前置核对](./docs/research/m6-recharge-timeout.md)） |
 | M7 | 关注 + 榜单 + 报表 + 后台收尾 | 待启动 |
 
 ## 开发命令
