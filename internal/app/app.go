@@ -19,6 +19,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/config"
 	"github.com/netfishx/gabon-go/internal/cron"
 	"github.com/netfishx/gabon-go/internal/customer"
+	"github.com/netfishx/gabon-go/internal/payment"
 	"github.com/netfishx/gabon-go/internal/report"
 	"github.com/netfishx/gabon-go/internal/signin"
 	"github.com/netfishx/gabon-go/internal/storage"
@@ -83,6 +84,12 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	signIns := signin.NewService(pool, wallets)
 	vips := vip.NewService(pool, wallets)
 	ads := ad.NewService(pool)
+	// 支付渠道注册表：本片仅内置 mock（真实三渠道移植+默认停用归 #69）。
+	registry, err := payment.NewRegistry(payment.NewMockProvider())
+	if err != nil {
+		return nil, err
+	}
+	payments := payment.NewService(pool, wallets, registry, cfg.CallbackBaseURL)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -100,10 +107,13 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		SignIns:   signIns,
 		Vips:      vips,
 		Ads:       ads,
+		Payments:  payments,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}
 	r.Mount("/api/v1", apiHandler.Routes())
+	// 支付回调：/api/v1 之外、无 JWT，身份靠验签（PRD #63）。
+	r.Mount("/callback", apiHandler.CallbackRoutes())
 
 	adminHandler := &admin.Handler{
 		Admins: admin.NewService(pool),
