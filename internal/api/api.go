@@ -6,6 +6,7 @@ import (
 
 	"github.com/netfishx/gabon-go/internal/ad"
 	"github.com/netfishx/gabon-go/internal/auth"
+	"github.com/netfishx/gabon-go/internal/bankcard"
 	"github.com/netfishx/gabon-go/internal/customer"
 	"github.com/netfishx/gabon-go/internal/payment"
 	"github.com/netfishx/gabon-go/internal/report"
@@ -29,6 +30,7 @@ type Handler struct {
 	Vips      *vip.Service
 	Ads       *ad.Service
 	Payments  *payment.Service
+	BankCards *bankcard.Service
 	Store     *storage.Store
 	CDNBase   string
 }
@@ -63,6 +65,9 @@ func (h *Handler) Routes() chi.Router {
 		r.Get("/vip/levels", h.handleVipLevels)
 		r.Post("/recharge/orders", h.handleRechargeCreate)
 		r.Get("/recharge/orders", h.handleRechargeList)
+		r.Post("/bank-cards", h.handleBankCardAdd)
+		r.Get("/bank-cards", h.handleBankCardList)
+		r.Delete("/bank-cards/{cardID}", h.handleBankCardDelete)
 		r.Post("/ads/watch", h.handleWatchAd)
 		r.Get("/claim-tasks", h.handleClaimTaskList)
 		r.Get("/claim-tasks/mine", h.handleMyClaims)
