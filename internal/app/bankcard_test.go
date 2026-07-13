@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -11,18 +12,18 @@ func TestBankCardAddThenList(t *testing.T) {
 	token := registerAndLogin(t, uniqueUsername(t))
 
 	resp, card := postJSON(t, "/api/v1/bank-cards", map[string]any{
-		"card_no":     "6222020202020202",
-		"holder_name": "张三",
-		"bank_name":   "中国工商银行",
-		"bank_code":   "ICBC",
-		"province":    "广东省",
-		"city":        "深圳市",
+		"card_no":     " 6222020202020202 ",
+		"holder_name": " 张三 ",
+		"bank_name":   " 中国工商银行 ",
+		"bank_code":   " ICBC ",
+		"province":    " 广东省 ",
+		"city":        " 深圳市 ",
 	}, token)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("add bank card: status = %d, want 201, body = %v", resp.StatusCode, card)
 	}
 	for field, want := range map[string]any{
-		"card_no":     "6222020202020202",
+		"card_no":     "6222****0202",
 		"holder_name": "张三",
 		"bank_name":   "中国工商银行",
 		"bank_code":   "ICBC",
@@ -35,6 +36,21 @@ func TestBankCardAddThenList(t *testing.T) {
 	}
 	if card["id"] == nil || card["created_at"] == nil {
 		t.Errorf("added card missing id/created_at: %v", card)
+	}
+	cardID := int64(card["id"].(float64))
+	var storedCardNo, storedHolderName, storedBankName, storedBankCode, storedProvince, storedCity string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT card_no, holder_name, bank_name, bank_code, province, city FROM bank_cards WHERE id = $1`, cardID,
+	).Scan(&storedCardNo, &storedHolderName, &storedBankName, &storedBankCode, &storedProvince, &storedCity); err != nil {
+		t.Fatalf("query stored bank card: %v", err)
+	}
+	if storedCardNo != "6222020202020202" {
+		t.Errorf("stored card_no = %q, want full number", storedCardNo)
+	}
+	if storedHolderName != "张三" || storedBankName != "中国工商银行" ||
+		storedBankCode != "ICBC" || storedProvince != "广东省" || storedCity != "深圳市" {
+		t.Errorf("stored trimmed fields = (%q, %q, %q, %q, %q)",
+			storedHolderName, storedBankName, storedBankCode, storedProvince, storedCity)
 	}
 
 	resp, body := getJSON(t, "/api/v1/bank-cards", token)
@@ -132,6 +148,30 @@ func TestBankCardAddValidatesRequiredFields(t *testing.T) {
 	}, token)
 	if resp.StatusCode != http.StatusBadRequest || body["code"] != "COMMON_INVALID_ARGUMENT" {
 		t.Fatalf("missing card_no: status = %d, body = %v, want 400 COMMON_INVALID_ARGUMENT", resp.StatusCode, body)
+	}
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{
+			name: "card_no_non_digits",
+			body: map[string]any{"card_no": "6222abcd02020202", "holder_name": "赵六", "bank_name": "招商银行"},
+		},
+		{
+			name: "card_no_too_short",
+			body: map[string]any{"card_no": "62220202020", "holder_name": "赵六", "bank_name": "招商银行"},
+		},
+		{
+			name: "holder_name_too_long",
+			body: map[string]any{"card_no": "6225880012345678", "holder_name": strings.Repeat("名", 65), "bank_name": "招商银行"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, body := postJSON(t, "/api/v1/bank-cards", tc.body, token)
+			if resp.StatusCode != http.StatusBadRequest || body["code"] != "COMMON_INVALID_ARGUMENT" {
+				t.Fatalf("status = %d, body = %v, want 400 COMMON_INVALID_ARGUMENT", resp.StatusCode, body)
+			}
+		})
 	}
 
 	resp, body = postJSON(t, "/api/v1/bank-cards", map[string]any{

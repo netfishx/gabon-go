@@ -2,8 +2,11 @@ package api
 
 import (
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -11,6 +14,8 @@ import (
 	"github.com/netfishx/gabon-go/internal/bankcard"
 	"github.com/netfishx/gabon-go/internal/db"
 )
+
+var bankCardNoPattern = regexp.MustCompile(`^\d{12,19}$`)
 
 type bankCardAddRequest struct {
 	CardNo     string  `json:"card_no"`
@@ -41,26 +46,57 @@ func (h *Handler) handleBankCardAdd(w http.ResponseWriter, r *http.Request) {
 	if !apierr.DecodeJSON(w, r, &req) {
 		return
 	}
+	req.CardNo = strings.TrimSpace(req.CardNo)
+	req.HolderName = strings.TrimSpace(req.HolderName)
+	req.BankName = strings.TrimSpace(req.BankName)
+	req.BankCode = nonEmpty(req.BankCode)
+	req.Province = nonEmpty(req.Province)
+	req.City = nonEmpty(req.City)
 	if req.CardNo == "" {
 		apierr.Write(w, apierr.InvalidArgument("card_no is required"))
+		return
+	}
+	if !bankCardNoPattern.MatchString(req.CardNo) {
+		apierr.Write(w, apierr.InvalidArgument("card_no must be 12-19 digits"))
 		return
 	}
 	if req.HolderName == "" {
 		apierr.Write(w, apierr.InvalidArgument("holder_name is required"))
 		return
 	}
+	if utf8.RuneCountInString(req.HolderName) > 64 {
+		apierr.Write(w, apierr.InvalidArgument("holder_name must be at most 64 characters"))
+		return
+	}
 	if req.BankName == "" {
 		apierr.Write(w, apierr.InvalidArgument("bank_name is required"))
 		return
+	}
+	if utf8.RuneCountInString(req.BankName) > 64 {
+		apierr.Write(w, apierr.InvalidArgument("bank_name must be at most 64 characters"))
+		return
+	}
+	for _, field := range []struct {
+		name  string
+		value *string
+	}{
+		{name: "bank_code", value: req.BankCode},
+		{name: "province", value: req.Province},
+		{name: "city", value: req.City},
+	} {
+		if field.value != nil && utf8.RuneCountInString(*field.value) > 32 {
+			apierr.Write(w, apierr.InvalidArgument(field.name+" must be at most 32 characters"))
+			return
+		}
 	}
 
 	card, err := h.BankCards.Add(r.Context(), customerFrom(r.Context()).ID, bankcard.AddParams{
 		CardNo:     req.CardNo,
 		HolderName: req.HolderName,
 		BankName:   req.BankName,
-		BankCode:   nonEmpty(req.BankCode),
-		Province:   nonEmpty(req.Province),
-		City:       nonEmpty(req.City),
+		BankCode:   req.BankCode,
+		Province:   req.Province,
+		City:       req.City,
 	})
 	if err != nil {
 		apierr.Write(w, err)
@@ -96,16 +132,20 @@ func (h *Handler) handleBankCardDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func nonEmpty(value *string) *string {
-	if value == nil || *value == "" {
+	if value == nil {
 		return nil
 	}
-	return value
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func toBankCardResponse(card db.BankCard) bankCardResponse {
 	return bankCardResponse{
 		ID:         card.ID,
-		CardNo:     card.CardNo,
+		CardNo:     card.CardNo[:4] + "****" + card.CardNo[len(card.CardNo)-4:],
 		HolderName: card.HolderName,
 		BankName:   card.BankName,
 		BankCode:   card.BankCode,
