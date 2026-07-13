@@ -69,6 +69,8 @@ func run(m *testing.M) (int, error) {
 		CDNBaseURL:    "http://" + mio.Endpoint + "/gabon-test",
 
 		PaymentEnableMock: true, // E2E 全链路需要 mock 渠道；生产默认 false
+		RechargeTimeout:   10 * time.Minute,
+		RechargeSweepSpec: "*/5 * * * *",
 
 		TranscodeWorkers: 2,
 		TranscodeTimeout: 60 * time.Second,

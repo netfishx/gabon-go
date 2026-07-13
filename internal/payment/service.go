@@ -18,9 +18,6 @@ import (
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
 
-// rechargeTimeout 充值订单超时窗口快照进 expires_at（超时取消 cron 归 #66；默认 10 分钟，PRD #63）。
-const rechargeTimeout = 10 * time.Minute
-
 // ErrUnknownProvider 表示回调路径上的 provider code 未注册（handler 映射 404）。
 var ErrUnknownProvider = errors.New("payment: unknown provider")
 
@@ -38,16 +35,18 @@ type Service struct {
 	wallets         *wallet.Service
 	registry        *Registry
 	callbackBaseURL string
+	rechargeTimeout time.Duration
 }
 
 // NewService 构造现金订单域服务。
-func NewService(pool *pgxpool.Pool, wallets *wallet.Service, registry *Registry, callbackBaseURL string) *Service {
+func NewService(pool *pgxpool.Pool, wallets *wallet.Service, registry *Registry, callbackBaseURL string, rechargeTimeout time.Duration) *Service {
 	return &Service{
 		pool:            pool,
 		q:               db.New(pool),
 		wallets:         wallets,
 		registry:        registry,
 		callbackBaseURL: callbackBaseURL,
+		rechargeTimeout: rechargeTimeout,
 	}
 }
 
@@ -72,7 +71,7 @@ func (s *Service) CreateRechargeOrder(ctx context.Context, customerID, fiatAmoun
 			FiatAmount:    fiatAmount,
 			PaymentMethod: &method,
 			Provider:      &providerCode,
-			ExpiresAt:     pgtype.Timestamptz{Time: time.Now().Add(rechargeTimeout), Valid: true},
+			ExpiresAt:     pgtype.Timestamptz{Time: time.Now().Add(s.rechargeTimeout), Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("insert recharge order: %w", err)

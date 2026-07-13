@@ -95,7 +95,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	if err != nil {
 		return nil, err
 	}
-	payments := payment.NewService(pool, wallets, registry, cfg.CallbackBaseURL)
+	payments := payment.NewService(pool, wallets, registry, cfg.CallbackBaseURL, cfg.RechargeTimeout)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -145,6 +145,18 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 			n, err := tasks.ExpireClaims(ctx)
 			if err == nil && n > 0 {
 				logger.Info("expired claim tasks", "count", n)
+			}
+			return err
+		},
+	}); err != nil {
+		return nil, err
+	}
+	if err := scheduler.Register(cron.Job{
+		Name: "cancel_expired_recharges", Spec: cfg.RechargeSweepSpec,
+		Run: func(ctx context.Context) error {
+			n, err := payments.CancelExpiredRecharges(ctx)
+			if err == nil && n > 0 {
+				logger.Info("cancelled expired recharges", "count", n)
 			}
 			return err
 		},

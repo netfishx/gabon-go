@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 // setRequiredEnv 置齐 Load 的必填项，便于聚焦单个可选项的行为。
 func setRequiredEnv(t *testing.T) {
@@ -36,5 +40,48 @@ func TestMockProviderEnabledWhenSet(t *testing.T) {
 	}
 	if !cfg.PaymentEnableMock {
 		t.Fatal("PAYMENT_ENABLE_MOCK=true should enable the mock provider")
+	}
+}
+
+func TestRechargeSweepDefaults(t *testing.T) {
+	setRequiredEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RechargeTimeout != 10*time.Minute {
+		t.Fatalf("RechargeTimeout = %s, want 10m", cfg.RechargeTimeout)
+	}
+	if cfg.RechargeSweepSpec != "*/5 * * * *" {
+		t.Fatalf("RechargeSweepSpec = %q, want %q", cfg.RechargeSweepSpec, "*/5 * * * *")
+	}
+}
+
+func TestRechargeSweepEnvOverrides(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("RECHARGE_TIMEOUT_SECONDS", "900")
+	t.Setenv("RECHARGE_SWEEP_CRON", "*/3 * * * *")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RechargeTimeout != 15*time.Minute {
+		t.Fatalf("RechargeTimeout = %s, want 15m", cfg.RechargeTimeout)
+	}
+	if cfg.RechargeSweepSpec != "*/3 * * * *" {
+		t.Fatalf("RechargeSweepSpec = %q, want %q", cfg.RechargeSweepSpec, "*/3 * * * *")
+	}
+}
+
+func TestRechargeTimeoutRejectsInvalidValue(t *testing.T) {
+	for _, value := range []string{"invalid", "0", "-1"} {
+		t.Run(value, func(t *testing.T) {
+			setRequiredEnv(t)
+			t.Setenv("RECHARGE_TIMEOUT_SECONDS", value)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "RECHARGE_TIMEOUT_SECONDS must be a positive integer") {
+				t.Fatalf("Load error = %v, want positive integer validation error", err)
+			}
+		})
 	}
 }

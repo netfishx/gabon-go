@@ -51,6 +51,30 @@ SET status = 'succeeded',
 WHERE id = sqlc.arg(id) AND status = 'pending_payment'
 RETURNING *;
 
+-- name: ListExpiredPendingRecharges :many
+SELECT * FROM recharge_orders
+WHERE status = 'pending_payment' AND expires_at < now()
+ORDER BY id
+LIMIT sqlc.arg(row_limit);
+
+-- name: MarkRechargeCancelled :one
+UPDATE recharge_orders
+SET status = 'cancelled',
+    provider_status = sqlc.narg(provider_status),
+    completed_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'pending_payment'
+RETURNING *;
+
+-- name: MarkRechargeFailed :one
+UPDATE recharge_orders
+SET status = 'failed',
+    provider_status = sqlc.narg(provider_status),
+    completed_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'pending_payment'
+RETURNING *;
+
 -- name: ListRechargeOrders :many
 SELECT * FROM recharge_orders
 WHERE customer_id = sqlc.arg(customer_id)
