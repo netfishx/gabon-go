@@ -58,6 +58,8 @@ const (
 	CodeVipNotUpgrade = "VIP_NOT_UPGRADE"
 
 	CodeRechargeMethodUnsupported = "RECHARGE_METHOD_UNSUPPORTED"
+
+	CodeBankCardNotFound = "BANK_CARD_NOT_FOUND"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。
