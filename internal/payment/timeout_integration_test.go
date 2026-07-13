@@ -24,15 +24,18 @@ func (timeoutProvider) SupportedMethods() []string { return []string{"timeout-st
 func (timeoutProvider) Withdraw(context.Context, WithdrawCommand) (*WithdrawResult, error) {
 	return &WithdrawResult{}, nil
 }
+
 func (timeoutProvider) ParseCallback(*CallbackRequest) (*CallbackResult, error) {
 	return &CallbackResult{}, nil
 }
+
 func (timeoutProvider) Pay(_ context.Context, cmd PayCommand) (*PayResult, error) {
 	return &PayResult{
 		ProviderOrderNo: "STUB-" + cmd.Order.OrderNo,
 		ProviderStatus:  "pending",
 	}, nil
 }
+
 func (p timeoutProvider) Query(context.Context, OrderView) (*QueryResult, error) {
 	return p.queryResult, p.queryErr
 }
@@ -65,7 +68,8 @@ func TestCancelExpiredRechargesCancelsPendingWithoutChangingBalance(t *testing.T
 	t.Cleanup(cleanup)
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00001', 'timeout_customer', 'not-a-real-hash', 'TIME0001') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -91,7 +95,8 @@ func TestCancelExpiredRechargesCancelsPendingWithoutChangingBalance(t *testing.T
 	if err != nil {
 		t.Fatalf("create recharge order: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.Exec(
+		ctx,
 		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 	); err != nil {
 		t.Fatalf("expire recharge order: %v", err)
@@ -121,7 +126,8 @@ func TestCancelExpiredRechargesCancelsPendingWithoutChangingBalance(t *testing.T
 	}
 
 	var eventCount int
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`SELECT count(*) FROM payment_events
 		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'cancelled'`,
 		order.OrderNo,
@@ -131,7 +137,6 @@ func TestCancelExpiredRechargesCancelsPendingWithoutChangingBalance(t *testing.T
 	if eventCount != 1 {
 		t.Fatalf("cancelled query event count = %d, want 1", eventCount)
 	}
-
 }
 
 func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
@@ -143,7 +148,8 @@ func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00002', 'timeout_paid', 'not-a-real-hash', 'TIME0002') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -168,7 +174,8 @@ func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create recharge order: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.Exec(
+		ctx,
 		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 	); err != nil {
 		t.Fatalf("expire recharge order: %v", err)
@@ -196,7 +203,8 @@ func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
 		t.Fatalf("available = %d, want %d", w.Available, amount)
 	}
 	var txCount int
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`SELECT count(*) FROM transactions WHERE customer_id = $1 AND type = 'recharge' AND ref_id = $2`,
 		customerID, order.ID,
 	).Scan(&txCount); err != nil {
@@ -206,7 +214,8 @@ func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
 		t.Fatalf("recharge transaction count = %d, want 1", txCount)
 	}
 	var eventCount int
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`SELECT count(*) FROM payment_events
 		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'settled'`,
 		order.OrderNo,
@@ -227,7 +236,8 @@ func TestCancelExpiredRechargesMarksProviderFailure(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00003', 'timeout_failed', 'not-a-real-hash', 'TIME0003') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -247,7 +257,8 @@ func TestCancelExpiredRechargesMarksProviderFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create recharge order: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.Exec(
+		ctx,
 		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 	); err != nil {
 		t.Fatalf("expire recharge order: %v", err)
@@ -275,7 +286,8 @@ func TestCancelExpiredRechargesMarksProviderFailure(t *testing.T) {
 		t.Fatalf("wallet = available %d frozen %d, want both 0", w.Available, w.Frozen)
 	}
 	var eventCount int
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`SELECT count(*) FROM payment_events
 		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'failed'`,
 		order.OrderNo,
@@ -296,7 +308,8 @@ func TestCancelExpiredRechargesLeavesFutureOrderPending(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00004', 'timeout_future', 'not-a-real-hash', 'TIME0004') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -341,7 +354,8 @@ func TestCancelExpiredRechargesRecordsQueryErrorAndRetriesLater(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00005', 'timeout_error', 'not-a-real-hash', 'TIME0005') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -360,7 +374,8 @@ func TestCancelExpiredRechargesRecordsQueryErrorAndRetriesLater(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create recharge order: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.Exec(
+		ctx,
 		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 	); err != nil {
 		t.Fatalf("expire recharge order: %v", err)
@@ -381,7 +396,8 @@ func TestCancelExpiredRechargesRecordsQueryErrorAndRetriesLater(t *testing.T) {
 		t.Fatalf("status = %s, want pending_payment", got.Status)
 	}
 	var eventCount int
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`SELECT count(*) FROM payment_events
 		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'error'`,
 		order.OrderNo,
@@ -426,7 +442,8 @@ func TestCancelExpiredRechargesSkipsAmountMismatch(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00006', 'timeout_mismatch', 'not-a-real-hash', 'TIME0006') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -447,7 +464,8 @@ func TestCancelExpiredRechargesSkipsAmountMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create recharge order: %v", err)
 	}
-	if _, err := pool.Exec(ctx,
+	if _, err := pool.Exec(
+		ctx,
 		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 	); err != nil {
 		t.Fatalf("expire recharge order: %v", err)
@@ -481,7 +499,8 @@ func TestRechargeCallbackAndTimeoutSweepReachOneTerminalState(t *testing.T) {
 	defer cleanup()
 
 	var customerID int64
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(
+		ctx,
 		`INSERT INTO customers (public_id, username, password_hash, invite_code)
 		 VALUES ('timeout00007', 'timeout_race', 'not-a-real-hash', 'TIME0007') RETURNING id`,
 	).Scan(&customerID); err != nil {
@@ -509,7 +528,8 @@ func TestRechargeCallbackAndTimeoutSweepReachOneTerminalState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create recharge order: %v", err)
 		}
-		if _, err := pool.Exec(ctx,
+		if _, err := pool.Exec(
+			ctx,
 			`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
 		); err != nil {
 			t.Fatalf("expire recharge order: %v", err)
@@ -545,7 +565,8 @@ func TestRechargeCallbackAndTimeoutSweepReachOneTerminalState(t *testing.T) {
 			t.Fatalf("get recharge order: %v", err)
 		}
 		var txCount int
-		if err := pool.QueryRow(ctx,
+		if err := pool.QueryRow(
+			ctx,
 			`SELECT count(*) FROM transactions WHERE type = 'recharge' AND ref_id = $1`, order.ID,
 		).Scan(&txCount); err != nil {
 			t.Fatalf("query recharge transaction: %v", err)
