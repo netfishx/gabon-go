@@ -205,6 +205,17 @@ func TestCancelExpiredRechargesSettlesPaidOrder(t *testing.T) {
 	if txCount != 1 {
 		t.Fatalf("recharge transaction count = %d, want 1", txCount)
 	}
+	var eventCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM payment_events
+		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'settled'`,
+		order.OrderNo,
+	).Scan(&eventCount); err != nil {
+		t.Fatalf("query payment event: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("settled query event count = %d, want 1", eventCount)
+	}
 }
 
 func TestCancelExpiredRechargesMarksProviderFailure(t *testing.T) {
@@ -262,6 +273,17 @@ func TestCancelExpiredRechargesMarksProviderFailure(t *testing.T) {
 	}
 	if w.Available != 0 || w.Frozen != 0 {
 		t.Fatalf("wallet = available %d frozen %d, want both 0", w.Available, w.Frozen)
+	}
+	var eventCount int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM payment_events
+		 WHERE order_no = $1 AND direction = 'query' AND payload->>'action' = 'failed'`,
+		order.OrderNo,
+	).Scan(&eventCount); err != nil {
+		t.Fatalf("query payment event: %v", err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("failed query event count = %d, want 1", eventCount)
 	}
 }
 
@@ -368,6 +390,30 @@ func TestCancelExpiredRechargesRecordsQueryErrorAndRetriesLater(t *testing.T) {
 	}
 	if eventCount != 1 {
 		t.Fatalf("error query event count = %d, want 1", eventCount)
+	}
+
+	recoveredProvider := timeoutProvider{queryResult: &QueryResult{
+		Outcome:        OutcomePending,
+		ProviderStatus: "pending",
+	}}
+	recoveredRegistry, err := NewRegistry(recoveredProvider)
+	if err != nil {
+		t.Fatalf("recovered registry: %v", err)
+	}
+	recoveredSvc := NewService(pool, wallet.NewService(pool), recoveredRegistry, "", 10*time.Minute)
+	cancelled, err = recoveredSvc.CancelExpiredRecharges(ctx)
+	if err != nil {
+		t.Fatalf("CancelExpiredRecharges after recovery: %v", err)
+	}
+	if cancelled != 1 {
+		t.Fatalf("cancelled after recovery = %d, want 1", cancelled)
+	}
+	got, err = db.New(pool).GetRechargeOrderByOrderNo(ctx, order.OrderNo)
+	if err != nil {
+		t.Fatalf("get recharge order after recovery: %v", err)
+	}
+	if got.Status != db.RechargeOrderStatusCancelled {
+		t.Fatalf("status after recovery = %s, want cancelled", got.Status)
 	}
 }
 
