@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/netfishx/gabon-go/internal/testdb"
 	"github.com/netfishx/gabon-go/internal/wallet"
@@ -38,7 +39,7 @@ func TestConcurrentCallbackCreditsExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
-	svc := NewService(pool, wallets, registry, "")
+	svc := NewService(pool, wallets, registry, "", 10*time.Minute)
 
 	const fiat = 25000
 	order, _, err := svc.CreateRechargeOrder(ctx, customerID, fiat, "mock")

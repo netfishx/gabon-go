@@ -35,6 +35,9 @@ type Config struct {
 	// PaymentEnableMock 是否注册内置 mock 支付渠道。**仅供 dev/test**：mock 回调不验签，
 	// 一旦启用，任意登录客户可经 /callback/mock/pay 自助充值刷钱。默认 false，生产绝不启用。
 	PaymentEnableMock bool
+	// 充值订单超时窗口在建单时快照进 expires_at；清扫 cron 语法由调度器注册时校验。
+	RechargeTimeout   time.Duration
+	RechargeSweepSpec string
 
 	// 转码 worker 池（ADR-0003）
 	TranscodeWorkers int
@@ -82,6 +85,18 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("config: TRANSCODE_TIMEOUT_SECONDS must be a positive integer")
 		}
 		cfg.TranscodeTimeout = time.Duration(n) * time.Second
+	}
+	cfg.RechargeTimeout = 10 * time.Minute
+	if raw := os.Getenv("RECHARGE_TIMEOUT_SECONDS"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("config: RECHARGE_TIMEOUT_SECONDS must be a positive integer")
+		}
+		cfg.RechargeTimeout = time.Duration(n) * time.Second
+	}
+	cfg.RechargeSweepSpec = os.Getenv("RECHARGE_SWEEP_CRON")
+	if cfg.RechargeSweepSpec == "" {
+		cfg.RechargeSweepSpec = "*/5 * * * *"
 	}
 	for name, v := range map[string]string{
 		"S3_ENDPOINT":   cfg.S3Endpoint,

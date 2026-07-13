@@ -171,6 +171,51 @@ func (q *Queries) InsertRechargeOrder(ctx context.Context, arg InsertRechargeOrd
 	return id, err
 }
 
+const listExpiredPendingRecharges = `-- name: ListExpiredPendingRecharges :many
+SELECT id, order_no, customer_id, amount, fiat_amount, currency, payment_method, provider, provider_order_no, provider_status, status, failure_code, failure_reason, expires_at, completed_at, created_at, updated_at FROM recharge_orders
+WHERE status = 'pending_payment' AND expires_at < now()
+ORDER BY id
+LIMIT $1
+`
+
+func (q *Queries) ListExpiredPendingRecharges(ctx context.Context, rowLimit int32) ([]RechargeOrder, error) {
+	rows, err := q.db.Query(ctx, listExpiredPendingRecharges, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RechargeOrder
+	for rows.Next() {
+		var i RechargeOrder
+		if err := rows.Scan(
+			&i.ID,
+			&i.OrderNo,
+			&i.CustomerID,
+			&i.Amount,
+			&i.FiatAmount,
+			&i.Currency,
+			&i.PaymentMethod,
+			&i.Provider,
+			&i.ProviderOrderNo,
+			&i.ProviderStatus,
+			&i.Status,
+			&i.FailureCode,
+			&i.FailureReason,
+			&i.ExpiresAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRechargeOrders = `-- name: ListRechargeOrders :many
 SELECT id, order_no, customer_id, amount, fiat_amount, currency, payment_method, provider, provider_order_no, provider_status, status, failure_code, failure_reason, expires_at, completed_at, created_at, updated_at FROM recharge_orders
 WHERE customer_id = $1
@@ -221,6 +266,86 @@ func (q *Queries) ListRechargeOrders(ctx context.Context, arg ListRechargeOrders
 		return nil, err
 	}
 	return items, nil
+}
+
+const markRechargeCancelled = `-- name: MarkRechargeCancelled :one
+UPDATE recharge_orders
+SET status = 'cancelled',
+    provider_status = $1,
+    completed_at = now(),
+    updated_at = now()
+WHERE id = $2 AND status = 'pending_payment'
+RETURNING id, order_no, customer_id, amount, fiat_amount, currency, payment_method, provider, provider_order_no, provider_status, status, failure_code, failure_reason, expires_at, completed_at, created_at, updated_at
+`
+
+type MarkRechargeCancelledParams struct {
+	ProviderStatus *string
+	ID             int64
+}
+
+func (q *Queries) MarkRechargeCancelled(ctx context.Context, arg MarkRechargeCancelledParams) (RechargeOrder, error) {
+	row := q.db.QueryRow(ctx, markRechargeCancelled, arg.ProviderStatus, arg.ID)
+	var i RechargeOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNo,
+		&i.CustomerID,
+		&i.Amount,
+		&i.FiatAmount,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.Provider,
+		&i.ProviderOrderNo,
+		&i.ProviderStatus,
+		&i.Status,
+		&i.FailureCode,
+		&i.FailureReason,
+		&i.ExpiresAt,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markRechargeFailed = `-- name: MarkRechargeFailed :one
+UPDATE recharge_orders
+SET status = 'failed',
+    provider_status = $1,
+    completed_at = now(),
+    updated_at = now()
+WHERE id = $2 AND status = 'pending_payment'
+RETURNING id, order_no, customer_id, amount, fiat_amount, currency, payment_method, provider, provider_order_no, provider_status, status, failure_code, failure_reason, expires_at, completed_at, created_at, updated_at
+`
+
+type MarkRechargeFailedParams struct {
+	ProviderStatus *string
+	ID             int64
+}
+
+func (q *Queries) MarkRechargeFailed(ctx context.Context, arg MarkRechargeFailedParams) (RechargeOrder, error) {
+	row := q.db.QueryRow(ctx, markRechargeFailed, arg.ProviderStatus, arg.ID)
+	var i RechargeOrder
+	err := row.Scan(
+		&i.ID,
+		&i.OrderNo,
+		&i.CustomerID,
+		&i.Amount,
+		&i.FiatAmount,
+		&i.Currency,
+		&i.PaymentMethod,
+		&i.Provider,
+		&i.ProviderOrderNo,
+		&i.ProviderStatus,
+		&i.Status,
+		&i.FailureCode,
+		&i.FailureReason,
+		&i.ExpiresAt,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const markRechargeSucceeded = `-- name: MarkRechargeSucceeded :one
