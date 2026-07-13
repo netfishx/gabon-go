@@ -21,6 +21,7 @@ gabon-go/
 │   ├── customer/            # 客户域：注册/资料/邀请裂变/有效用户判定
 │   ├── wallet/              # 钱包域（核心被依赖域）：余额 + 流水
 │   ├── payment/             # 现金订单 + Provider 接口/注册表 + pay126/stpay/hotcl/mock
+│   ├── bankcard/            # 银行卡（提现收款目标，#67 提现建单消费）
 │   ├── video/               # 视频域：上传 confirm/状态机/互动/Feed
 │   ├── transcode/           # 转码任务认领 + ffmpeg worker 池（ADR-0003）
 │   ├── ranking/             # 热度周/月榜结算 cron
