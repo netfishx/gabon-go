@@ -182,6 +182,13 @@ func (s *Service) HandlePayCallback(ctx context.Context, providerCode string, re
 	if res.FiatAmount != order.FiatAmount {
 		slog.WarnContext(ctx, "payment callback amount mismatch",
 			"order_no", order.OrderNo, "callback_amount", res.FiatAmount, "order_amount", order.FiatAmount)
+		reason := fmt.Sprintf("callback_amount=%d order_amount=%d", res.FiatAmount, order.FiatAmount)
+		if _, err := s.q.MarkRechargeAmountMismatch(ctx, db.MarkRechargeAmountMismatchParams{
+			Reason: &reason,
+			ID:     order.ID,
+		}); err != nil {
+			slog.WarnContext(ctx, "mark callback amount mismatch failed", "order_no", order.OrderNo, "error", err)
+		}
 		return &res.AckFailure, nil
 	}
 

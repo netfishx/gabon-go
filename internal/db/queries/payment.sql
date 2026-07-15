@@ -46,6 +46,8 @@ WHERE id = sqlc.arg(id);
 UPDATE recharge_orders
 SET status = 'succeeded',
     provider_status = sqlc.narg(provider_status),
+    failure_code = NULL,
+    failure_reason = NULL,
     completed_at = now(),
     updated_at = now()
 WHERE id = sqlc.arg(id) AND status = 'pending_payment'
@@ -53,9 +55,20 @@ RETURNING *;
 
 -- name: ListExpiredPendingRecharges :many
 SELECT * FROM recharge_orders
-WHERE status = 'pending_payment' AND expires_at < now()
+WHERE status = 'pending_payment'
+  AND expires_at < now()
+  AND failure_code IS NULL
 ORDER BY id
 LIMIT sqlc.arg(row_limit);
+
+-- name: MarkRechargeAmountMismatch :execrows
+UPDATE recharge_orders
+SET failure_code = 'amount_mismatch',
+    failure_reason = sqlc.arg(reason),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'pending_payment'
+  AND failure_code IS NULL;
 
 -- name: MarkRechargeCancelled :one
 UPDATE recharge_orders

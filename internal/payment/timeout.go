@@ -6,14 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/netfishx/gabon-go/internal/db"
 )
 
-// sweepBatchSize 单轮清扫上限沿用旧版，避免一次任务长时间占用数据库与渠道连接。
-const sweepBatchSize = 200
+const (
+	// sweepBatchSize 单轮清扫上限沿用旧版，避免一次任务长时间占用数据库与渠道连接。
+	sweepBatchSize = 200
+	// sweepGraceWindow 按 #75 裁决以时间宽限替代次数计数，固定策略不进入 config。
+	sweepGraceWindow = 24 * time.Hour
+)
 
 // CancelExpiredRecharges 清扫过期未支付充值单（先查后取消）。
 // 返回本轮实际翻 cancelled 的单数。单笔失败不阻断整轮；列表查询失败时才返回错误。
@@ -27,12 +32,18 @@ func (s *Service) CancelExpiredRecharges(ctx context.Context) (int, error) {
 	for _, order := range orders {
 		if order.Provider == nil {
 			slog.WarnContext(ctx, "recharge sweep missing provider", "order_no", order.OrderNo)
+			if s.graceCancelRecharge(ctx, order, "", "missing_provider", nil) {
+				cancelled++
+			}
 			continue
 		}
 		providerCode := *order.Provider
 		prov := s.registry.ByCode(providerCode)
 		if prov == nil {
 			slog.WarnContext(ctx, "recharge sweep provider not registered", "order_no", order.OrderNo, "provider", providerCode)
+			if s.graceCancelRecharge(ctx, order, providerCode, "unregistered_provider", nil) {
+				cancelled++
+			}
 			continue
 		}
 
@@ -44,6 +55,10 @@ func (s *Service) CancelExpiredRecharges(ctx context.Context) (int, error) {
 		})
 		if err != nil {
 			slog.WarnContext(ctx, "recharge provider query failed", "order_no", order.OrderNo, "provider", providerCode, "error", err)
+			if s.graceCancelRecharge(ctx, order, providerCode, "query_error", err) {
+				cancelled++
+				continue
+			}
 			s.recordQueryError(ctx, order.OrderNo, providerCode, err)
 			continue
 		}
@@ -54,6 +69,18 @@ func (s *Service) CancelExpiredRecharges(ctx context.Context) (int, error) {
 			if res.FiatAmount != order.FiatAmount {
 				slog.WarnContext(ctx, "recharge query amount mismatch",
 					"order_no", order.OrderNo, "query_amount", res.FiatAmount, "order_amount", order.FiatAmount)
+				reason := fmt.Sprintf("query_amount=%d order_amount=%d", res.FiatAmount, order.FiatAmount)
+				rows, err := s.q.MarkRechargeAmountMismatch(ctx, db.MarkRechargeAmountMismatchParams{
+					Reason: &reason,
+					ID:     order.ID,
+				})
+				if err != nil {
+					slog.WarnContext(ctx, "mark recharge amount mismatch failed", "order_no", order.OrderNo, "error", err)
+				} else if rows == 0 {
+					slog.WarnContext(ctx, "mark recharge amount mismatch skipped", "order_no", order.OrderNo)
+				} else {
+					action = "amount_mismatch"
+				}
 				break
 			}
 			if err := s.settleRecharge(ctx, order, res.ProviderStatus); err != nil {
@@ -86,6 +113,35 @@ func (s *Service) CancelExpiredRecharges(ctx context.Context) (int, error) {
 		s.recordQueryResult(ctx, order.OrderNo, providerCode, action, res)
 	}
 	return cancelled, nil
+}
+
+// graceCancelRecharge 在无法取得可信查账结论且超过宽限期时兜底终结订单。
+func (s *Service) graceCancelRecharge(ctx context.Context, order db.RechargeOrder, providerCode, reason string, cause error) bool {
+	if !time.Now().After(order.ExpiresAt.Time.Add(sweepGraceWindow)) {
+		return false
+	}
+	if _, err := s.q.MarkRechargeCancelled(ctx, db.MarkRechargeCancelledParams{
+		ProviderStatus: order.ProviderStatus,
+		ID:             order.ID,
+	}); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.WarnContext(ctx, "grace cancel recharge failed", "order_no", order.OrderNo, "error", err)
+		}
+		return false
+	}
+	s.recordGraceCancellation(ctx, order.OrderNo, providerCode, reason, cause)
+	return true
+}
+
+func (s *Service) recordGraceCancellation(ctx context.Context, orderNo, providerCode, reason string, cause error) {
+	payload := map[string]string{"action": "grace_cancelled", "reason": reason}
+	if cause != nil {
+		payload["error"] = cause.Error()
+	}
+	b, _ := json.Marshal(payload)
+	if err := insertEvent(ctx, s.q, orderNo, providerCode, db.PaymentEventDirectionQuery, b); err != nil {
+		slog.ErrorContext(ctx, "record recharge grace cancellation event failed", "order_no", orderNo, "error", err)
+	}
 }
 
 func (s *Service) recordQueryError(ctx context.Context, orderNo, providerCode string, cause error) {
