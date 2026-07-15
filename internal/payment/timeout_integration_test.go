@@ -20,6 +20,7 @@ type timeoutProvider struct {
 	queryResult *QueryResult
 	queryErr    error
 	queryCalls  *atomic.Int32
+	queryFn     func(context.Context, OrderView) (*QueryResult, error)
 }
 
 func (timeoutProvider) Code() string               { return "timeout-stub" }
@@ -39,9 +40,12 @@ func (timeoutProvider) Pay(_ context.Context, cmd PayCommand) (*PayResult, error
 	}, nil
 }
 
-func (p timeoutProvider) Query(context.Context, OrderView) (*QueryResult, error) {
+func (p timeoutProvider) Query(ctx context.Context, order OrderView) (*QueryResult, error) {
 	if p.queryCalls != nil {
 		p.queryCalls.Add(1)
+	}
+	if p.queryFn != nil {
+		return p.queryFn(ctx, order)
 	}
 	return p.queryResult, p.queryErr
 }
@@ -571,6 +575,189 @@ func TestCancelExpiredRechargesMarksAndExcludesAmountMismatchThenSettlesCorrectC
 	}
 }
 
+func TestCancelExpiredRechargesDoesNotClaimAmountMismatchWhenMarkerCASLoses(t *testing.T) {
+	ctx := context.Background()
+	pool, cleanup, err := testdb.Start(ctx)
+	if err != nil {
+		t.Fatalf("start testdb: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	var customerID int64
+	if err := pool.QueryRow(
+		ctx,
+		`INSERT INTO customers (public_id, username, password_hash, invite_code)
+		 VALUES ('timeout00009', 'timeout_mismatch_race', 'not-a-real-hash', 'TIME0009') RETURNING id`,
+	).Scan(&customerID); err != nil {
+		t.Fatalf("stage customer: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO wallets (customer_id) VALUES ($1)`, customerID); err != nil {
+		t.Fatalf("stage wallet: %v", err)
+	}
+
+	var orderID int64
+	provider := timeoutProvider{queryFn: func(ctx context.Context, _ OrderView) (*QueryResult, error) {
+		if _, err := pool.Exec(
+			ctx,
+			`UPDATE recharge_orders
+			 SET status = 'cancelled', completed_at = now(), updated_at = now()
+			 WHERE id = $1 AND status = 'pending_payment'`,
+			orderID,
+		); err != nil {
+			return nil, err
+		}
+		return &QueryResult{Outcome: OutcomeSuccess, ProviderStatus: "success", FiatAmount: 1}, nil
+	}}
+	registry, err := NewRegistry(provider)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	svc := NewService(pool, wallet.NewService(pool), registry, "", 10*time.Minute)
+	order, _, err := svc.CreateRechargeOrder(ctx, customerID, 10000, "timeout-stub")
+	if err != nil {
+		t.Fatalf("create recharge order: %v", err)
+	}
+	orderID = order.ID
+	if _, err := pool.Exec(
+		ctx,
+		`UPDATE recharge_orders SET expires_at = now() - interval '1 minute' WHERE id = $1`, order.ID,
+	); err != nil {
+		t.Fatalf("expire recharge order: %v", err)
+	}
+
+	if _, err := svc.CancelExpiredRecharges(ctx); err != nil {
+		t.Fatalf("CancelExpiredRecharges: %v", err)
+	}
+	var mismatchEvents, skippedEvents int
+	if err := pool.QueryRow(
+		ctx,
+		`SELECT count(*) FILTER (WHERE payload->>'action' = 'amount_mismatch'),
+		        count(*) FILTER (WHERE payload->>'action' = 'skipped')
+		 FROM payment_events WHERE order_no = $1 AND direction = 'query'`,
+		order.OrderNo,
+	).Scan(&mismatchEvents, &skippedEvents); err != nil {
+		t.Fatalf("query sweep events: %v", err)
+	}
+	if mismatchEvents != 0 || skippedEvents != 1 {
+		t.Fatalf("query events = amount_mismatch %d skipped %d, want 0 and 1", mismatchEvents, skippedEvents)
+	}
+}
+
+func TestRechargeCallbackMarksAmountMismatchAndExcludesSweepThenCorrectCallbackSettles(t *testing.T) {
+	ctx := context.Background()
+	pool, cleanup, err := testdb.Start(ctx)
+	if err != nil {
+		t.Fatalf("start testdb: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	var customerID int64
+	if err := pool.QueryRow(
+		ctx,
+		`INSERT INTO customers (public_id, username, password_hash, invite_code)
+		 VALUES ('timeout00010', 'timeout_callback_mismatch', 'not-a-real-hash', 'TIME0010') RETURNING id`,
+	).Scan(&customerID); err != nil {
+		t.Fatalf("stage customer: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO wallets (customer_id) VALUES ($1)`, customerID); err != nil {
+		t.Fatalf("stage wallet: %v", err)
+	}
+
+	var queryCalls atomic.Int32
+	provider := raceTimeoutProvider{timeoutProvider{
+		queryResult: &QueryResult{Outcome: OutcomePending, ProviderStatus: "pending"},
+		queryCalls:  &queryCalls,
+	}}
+	registry, err := NewRegistry(provider)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	svc := NewService(pool, wallet.NewService(pool), registry, "", 10*time.Minute)
+	const amount = int64(14000)
+	order, _, err := svc.CreateRechargeOrder(ctx, customerID, amount, "timeout-stub")
+	if err != nil {
+		t.Fatalf("create recharge order: %v", err)
+	}
+
+	mismatchForm := url.Values{
+		"order_no":          {order.OrderNo},
+		"provider_order_no": {"STUB-" + order.OrderNo},
+		"amount":            {"1"},
+	}
+	ack, err := svc.HandlePayCallback(ctx, provider.Code(), &CallbackRequest{Form: mismatchForm})
+	if err != nil {
+		t.Fatalf("HandlePayCallback amount mismatch: %v", err)
+	}
+	if string(ack.Body) != "fail" {
+		t.Fatalf("amount mismatch ack = %q, want fail", ack.Body)
+	}
+	got, err := db.New(pool).GetRechargeOrderByOrderNo(ctx, order.OrderNo)
+	if err != nil {
+		t.Fatalf("get recharge order after mismatch callback: %v", err)
+	}
+	if got.Status != db.RechargeOrderStatusPendingPayment {
+		t.Fatalf("status after mismatch callback = %s, want pending_payment", got.Status)
+	}
+	if got.FailureCode == nil || *got.FailureCode != "amount_mismatch" {
+		t.Fatalf("failure_code = %v, want amount_mismatch", got.FailureCode)
+	}
+	if got.FailureReason == nil || !strings.Contains(*got.FailureReason, "callback_amount=1") || !strings.Contains(*got.FailureReason, "order_amount=14000") {
+		t.Fatalf("failure_reason = %v, want callback and order amounts", got.FailureReason)
+	}
+	if _, err := pool.Exec(
+		ctx,
+		`UPDATE recharge_orders SET expires_at = now() - interval '25 hours' WHERE id = $1`, order.ID,
+	); err != nil {
+		t.Fatalf("expire recharge order: %v", err)
+	}
+	if _, err := svc.CancelExpiredRecharges(ctx); err != nil {
+		t.Fatalf("CancelExpiredRecharges: %v", err)
+	}
+	if got := queryCalls.Load(); got != 0 {
+		t.Fatalf("query calls after mismatch callback = %d, want 0", got)
+	}
+
+	correctForm := url.Values{
+		"order_no":          {order.OrderNo},
+		"provider_order_no": {"STUB-" + order.OrderNo},
+		"amount":            {strconv.FormatInt(amount, 10)},
+	}
+	ack, err = svc.HandlePayCallback(ctx, provider.Code(), &CallbackRequest{Form: correctForm})
+	if err != nil {
+		t.Fatalf("HandlePayCallback corrected amount: %v", err)
+	}
+	if string(ack.Body) != "success" {
+		t.Fatalf("corrected amount ack = %q, want success", ack.Body)
+	}
+	got, err = db.New(pool).GetRechargeOrderByOrderNo(ctx, order.OrderNo)
+	if err != nil {
+		t.Fatalf("get recharge order after corrected callback: %v", err)
+	}
+	if got.Status != db.RechargeOrderStatusSucceeded {
+		t.Fatalf("status after corrected callback = %s, want succeeded", got.Status)
+	}
+	if got.FailureCode != nil || got.FailureReason != nil {
+		t.Fatalf("failure marker after corrected callback = (%v, %v), want both nil", got.FailureCode, got.FailureReason)
+	}
+	w, err := wallet.NewService(pool).Get(ctx, customerID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if w.Available != amount || w.Frozen != 0 {
+		t.Fatalf("wallet = available %d frozen %d, want %d and 0", w.Available, w.Frozen, amount)
+	}
+	var txCount int
+	if err := pool.QueryRow(
+		ctx,
+		`SELECT count(*) FROM transactions WHERE type = 'recharge' AND ref_id = $1`, order.ID,
+	).Scan(&txCount); err != nil {
+		t.Fatalf("query recharge transaction: %v", err)
+	}
+	if txCount != 1 {
+		t.Fatalf("recharge transaction count = %d, want 1", txCount)
+	}
+}
+
 func TestCancelExpiredRechargesGraceCancelsQueryErrorAndLateCallbackStaysCancelled(t *testing.T) {
 	ctx := context.Background()
 	pool, cleanup, err := testdb.Start(ctx)
@@ -781,6 +968,114 @@ func TestCancelExpiredRechargesHandlesUnregisteredProviderGraceWindow(t *testing
 	}
 }
 
+func TestCancelExpiredRechargesHandlesMissingProviderGraceWindow(t *testing.T) {
+	tests := []struct {
+		name           string
+		expiresAgo     string
+		wantStatus     db.RechargeOrderStatus
+		wantCancelled  int
+		wantEventCount int
+	}{
+		{
+			name:           "inside grace remains pending",
+			expiresAgo:     "1 minute",
+			wantStatus:     db.RechargeOrderStatusPendingPayment,
+			wantCancelled:  0,
+			wantEventCount: 0,
+		},
+		{
+			name:           "beyond grace is cancelled",
+			expiresAgo:     "25 hours",
+			wantStatus:     db.RechargeOrderStatusCancelled,
+			wantCancelled:  1,
+			wantEventCount: 1,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pool, cleanup, err := testdb.Start(ctx)
+			if err != nil {
+				t.Fatalf("start testdb: %v", err)
+			}
+			t.Cleanup(cleanup)
+
+			var customerID int64
+			if err := pool.QueryRow(
+				ctx,
+				`INSERT INTO customers (public_id, username, password_hash, invite_code)
+				 VALUES ($1, $2, 'not-a-real-hash', $3) RETURNING id`,
+				"timeout-missing-"+strconv.Itoa(i),
+				"timeout_missing_"+strconv.Itoa(i),
+				"TIMEMS"+strconv.Itoa(i),
+			).Scan(&customerID); err != nil {
+				t.Fatalf("stage customer: %v", err)
+			}
+			if _, err := pool.Exec(ctx, `INSERT INTO wallets (customer_id) VALUES ($1)`, customerID); err != nil {
+				t.Fatalf("stage wallet: %v", err)
+			}
+
+			provider := timeoutProvider{queryResult: &QueryResult{Outcome: OutcomePending}}
+			registry, err := NewRegistry(provider)
+			if err != nil {
+				t.Fatalf("registry: %v", err)
+			}
+			svc := NewService(pool, wallet.NewService(pool), registry, "", 10*time.Minute)
+			order, _, err := svc.CreateRechargeOrder(ctx, customerID, 15000, "timeout-stub")
+			if err != nil {
+				t.Fatalf("create recharge order: %v", err)
+			}
+			if _, err := pool.Exec(
+				ctx,
+				`UPDATE recharge_orders
+				 SET provider = NULL, expires_at = now() - $1::interval
+				 WHERE id = $2`,
+				tt.expiresAgo,
+				order.ID,
+			); err != nil {
+				t.Fatalf("remove provider and expire recharge order: %v", err)
+			}
+
+			cancelled, err := svc.CancelExpiredRecharges(ctx)
+			if err != nil {
+				t.Fatalf("CancelExpiredRecharges: %v", err)
+			}
+			if cancelled != tt.wantCancelled {
+				t.Fatalf("cancelled = %d, want %d", cancelled, tt.wantCancelled)
+			}
+			got, err := db.New(pool).GetRechargeOrderByOrderNo(ctx, order.OrderNo)
+			if err != nil {
+				t.Fatalf("get recharge order: %v", err)
+			}
+			if got.Status != tt.wantStatus {
+				t.Fatalf("status = %s, want %s", got.Status, tt.wantStatus)
+			}
+			w, err := wallet.NewService(pool).Get(ctx, customerID)
+			if err != nil {
+				t.Fatalf("get wallet: %v", err)
+			}
+			if w.Available != 0 || w.Frozen != 0 {
+				t.Fatalf("wallet = available %d frozen %d, want both 0", w.Available, w.Frozen)
+			}
+			var eventCount int
+			if err := pool.QueryRow(
+				ctx,
+				`SELECT count(*) FROM payment_events
+				 WHERE order_no = $1 AND direction = 'query'
+				   AND payload->>'action' = 'grace_cancelled'
+				   AND payload->>'reason' = 'missing_provider'`,
+				order.OrderNo,
+			).Scan(&eventCount); err != nil {
+				t.Fatalf("query grace cancellation event: %v", err)
+			}
+			if eventCount != tt.wantEventCount {
+				t.Fatalf("grace cancellation event count = %d, want %d", eventCount, tt.wantEventCount)
+			}
+		})
+	}
+}
+
 func TestRechargeSweepIndexMigration(t *testing.T) {
 	ctx := context.Background()
 	pool, cleanup, err := testdb.Start(ctx)
@@ -789,32 +1084,31 @@ func TestRechargeSweepIndexMigration(t *testing.T) {
 	}
 	t.Cleanup(cleanup)
 
-	rows, err := pool.Query(
+	var indexDef string
+	if err := pool.QueryRow(
 		ctx,
-		`SELECT indexname FROM pg_indexes
-		 WHERE schemaname = current_schema() AND tablename = 'recharge_orders'`,
-	)
-	if err != nil {
-		t.Fatalf("query recharge indexes: %v", err)
+		`SELECT indexdef FROM pg_indexes
+		 WHERE schemaname = current_schema()
+		   AND indexname = 'recharge_orders_pending_expires_idx'`,
+	).Scan(&indexDef); err != nil {
+		t.Fatalf("query recharge sweep index: %v", err)
 	}
-	defer rows.Close()
-
-	indexes := make(map[string]bool)
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan recharge index: %v", err)
+	for _, part := range []string{"expires_at", "pending_payment", "failure_code IS NULL"} {
+		if !strings.Contains(indexDef, part) {
+			t.Fatalf("sweep index definition %q does not contain %q", indexDef, part)
 		}
-		indexes[name] = true
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate recharge indexes: %v", err)
+	var oldIndexCount int
+	if err := pool.QueryRow(
+		ctx,
+		`SELECT count(*) FROM pg_indexes
+		 WHERE schemaname = current_schema()
+		   AND indexname = 'recharge_orders_status_idx'`,
+	).Scan(&oldIndexCount); err != nil {
+		t.Fatalf("query old recharge index: %v", err)
 	}
-	if !indexes["recharge_orders_pending_expires_idx"] {
-		t.Fatal("recharge_orders_pending_expires_idx is missing")
-	}
-	if indexes["recharge_orders_status_idx"] {
-		t.Fatal("recharge_orders_status_idx still exists")
+	if oldIndexCount != 0 {
+		t.Fatalf("recharge_orders_status_idx count = %d, want 0", oldIndexCount)
 	}
 }
 

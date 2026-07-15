@@ -70,13 +70,17 @@ func (s *Service) CancelExpiredRecharges(ctx context.Context) (int, error) {
 				slog.WarnContext(ctx, "recharge query amount mismatch",
 					"order_no", order.OrderNo, "query_amount", res.FiatAmount, "order_amount", order.FiatAmount)
 				reason := fmt.Sprintf("query_amount=%d order_amount=%d", res.FiatAmount, order.FiatAmount)
-				if _, err := s.q.MarkRechargeAmountMismatch(ctx, db.MarkRechargeAmountMismatchParams{
+				rows, err := s.q.MarkRechargeAmountMismatch(ctx, db.MarkRechargeAmountMismatchParams{
 					Reason: &reason,
 					ID:     order.ID,
-				}); err != nil {
+				})
+				if err != nil {
 					slog.WarnContext(ctx, "mark recharge amount mismatch failed", "order_no", order.OrderNo, "error", err)
+				} else if rows == 0 {
+					slog.WarnContext(ctx, "mark recharge amount mismatch skipped", "order_no", order.OrderNo)
+				} else {
+					action = "amount_mismatch"
 				}
-				action = "amount_mismatch"
 				break
 			}
 			if err := s.settleRecharge(ctx, order, res.ProviderStatus); err != nil {
