@@ -9,6 +9,35 @@ import (
 	"context"
 )
 
+const getOwnedBankCard = `-- name: GetOwnedBankCard :one
+SELECT id, customer_id, card_no, holder_name, bank_name, bank_code, province, city, deleted_at, created_at, updated_at FROM bank_cards
+WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+`
+
+type GetOwnedBankCardParams struct {
+	ID         int64
+	CustomerID int64
+}
+
+func (q *Queries) GetOwnedBankCard(ctx context.Context, arg GetOwnedBankCardParams) (BankCard, error) {
+	row := q.db.QueryRow(ctx, getOwnedBankCard, arg.ID, arg.CustomerID)
+	var i BankCard
+	err := row.Scan(
+		&i.ID,
+		&i.CustomerID,
+		&i.CardNo,
+		&i.HolderName,
+		&i.BankName,
+		&i.BankCode,
+		&i.Province,
+		&i.City,
+		&i.DeletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertBankCard = `-- name: InsertBankCard :one
 INSERT INTO bank_cards (customer_id, card_no, holder_name, bank_name, bank_code, province, city)
 VALUES ($1, $2, $3, $4,
@@ -93,7 +122,13 @@ func (q *Queries) ListBankCards(ctx context.Context, customerID int64) ([]BankCa
 
 const softDeleteBankCard = `-- name: SoftDeleteBankCard :execrows
 UPDATE bank_cards SET deleted_at = now(), updated_at = now()
-WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+WHERE bank_cards.id = $1
+  AND bank_cards.customer_id = $2
+  AND bank_cards.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM withdrawal_orders w
+      WHERE w.bank_card_id = bank_cards.id AND w.status IN ('pending_review', 'paying')
+  )
 `
 
 type SoftDeleteBankCardParams struct {

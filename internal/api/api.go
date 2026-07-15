@@ -16,6 +16,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/vip"
 	"github.com/netfishx/gabon-go/internal/wallet"
+	"github.com/netfishx/gabon-go/internal/withdraw"
 )
 
 // Handler 客户面 /api/v1 的 handler 集。
@@ -31,6 +32,7 @@ type Handler struct {
 	Ads       *ad.Service
 	Payments  *payment.Service
 	BankCards *bankcard.Service
+	Withdraws *withdraw.Service
 	Store     *storage.Store
 	CDNBase   string
 }
@@ -68,6 +70,9 @@ func (h *Handler) Routes() chi.Router {
 		r.Post("/bank-cards", h.handleBankCardAdd)
 		r.Get("/bank-cards", h.handleBankCardList)
 		r.Delete("/bank-cards/{cardID}", h.handleBankCardDelete)
+		r.Put("/withdrawal-password", h.handleWithdrawalPasswordSet)
+		r.Post("/withdrawal/orders", h.handleWithdrawalCreate)
+		r.Get("/withdrawal/orders", h.handleWithdrawalList)
 		r.Post("/ads/watch", h.handleWatchAd)
 		r.Get("/claim-tasks", h.handleClaimTaskList)
 		r.Get("/claim-tasks/mine", h.handleMyClaims)

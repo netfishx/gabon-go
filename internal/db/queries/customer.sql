@@ -18,6 +18,11 @@ SELECT * FROM customers WHERE public_id = $1 AND deleted_at IS NULL;
 -- name: SetCustomerLastLogin :exec
 UPDATE customers SET last_login_at = now(), updated_at = now() WHERE id = $1;
 
+-- name: SetWithdrawalPasswordHash :exec
+UPDATE customers
+SET withdrawal_password_hash = sqlc.arg(withdrawal_password_hash), updated_at = now()
+WHERE id = sqlc.arg(id);
+
 -- name: UpdateCustomerPassword :exec
 UPDATE customers
 SET password_hash = $2, password_changed_at = now(), updated_at = now()

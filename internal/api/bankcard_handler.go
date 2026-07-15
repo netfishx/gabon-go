@@ -145,7 +145,7 @@ func nonEmpty(value *string) *string {
 func toBankCardResponse(card db.BankCard) bankCardResponse {
 	return bankCardResponse{
 		ID:         card.ID,
-		CardNo:     card.CardNo[:4] + "****" + card.CardNo[len(card.CardNo)-4:],
+		CardNo:     maskBankCardNo(card.CardNo),
 		HolderName: card.HolderName,
 		BankName:   card.BankName,
 		BankCode:   card.BankCode,
@@ -153,4 +153,8 @@ func toBankCardResponse(card db.BankCard) bankCardResponse {
 		City:       card.City,
 		CreatedAt:  card.CreatedAt.Time,
 	}
+}
+
+func maskBankCardNo(cardNo string) string {
+	return cardNo[:4] + "****" + cardNo[len(cardNo)-4:]
 }

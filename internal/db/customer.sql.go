@@ -345,6 +345,22 @@ func (q *Queries) SetCustomerLastLogin(ctx context.Context, id int64) error {
 	return err
 }
 
+const setWithdrawalPasswordHash = `-- name: SetWithdrawalPasswordHash :exec
+UPDATE customers
+SET withdrawal_password_hash = $1, updated_at = now()
+WHERE id = $2
+`
+
+type SetWithdrawalPasswordHashParams struct {
+	WithdrawalPasswordHash *string
+	ID                     int64
+}
+
+func (q *Queries) SetWithdrawalPasswordHash(ctx context.Context, arg SetWithdrawalPasswordHashParams) error {
+	_, err := q.db.Exec(ctx, setWithdrawalPasswordHash, arg.WithdrawalPasswordHash, arg.ID)
+	return err
+}
+
 const sumInviteRewards = `-- name: SumInviteRewards :one
 SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions
 WHERE customer_id = $1 AND type = 'invite_valid_reward'

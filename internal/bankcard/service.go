@@ -3,9 +3,11 @@ package bankcard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/netfishx/gabon-go/internal/apierr"
@@ -58,7 +60,19 @@ func (s *Service) List(ctx context.Context, customerID int64) ([]db.BankCard, er
 	return cards, nil
 }
 
-// SoftDelete 软删客户名下银行卡；未命中时不区分不存在、非本人或已删除。
+// GetOwned 读取客户名下未删除银行卡；不存在、非本人或已删除统一返回 404。
+func (s *Service) GetOwned(ctx context.Context, customerID, cardID int64) (db.BankCard, error) {
+	card, err := s.q.GetOwnedBankCard(ctx, db.GetOwnedBankCardParams{ID: cardID, CustomerID: customerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.BankCard{}, apierr.New(http.StatusNotFound, apierr.CodeBankCardNotFound, "bank card not found")
+	}
+	if err != nil {
+		return db.BankCard{}, fmt.Errorf("get owned bank card: %w", err)
+	}
+	return card, nil
+}
+
+// SoftDelete 软删客户名下银行卡；SQL 守卫阻止删除在途提现引用的卡。
 func (s *Service) SoftDelete(ctx context.Context, customerID, cardID int64) error {
 	rows, err := s.q.SoftDeleteBankCard(ctx, db.SoftDeleteBankCardParams{
 		ID:         cardID,
@@ -68,7 +82,10 @@ func (s *Service) SoftDelete(ctx context.Context, customerID, cardID int64) erro
 		return fmt.Errorf("soft delete bank card: %w", err)
 	}
 	if rows == 0 {
-		return apierr.New(http.StatusNotFound, apierr.CodeBankCardNotFound, "bank card not found")
+		if _, err := s.GetOwned(ctx, customerID, cardID); err != nil {
+			return err
+		}
+		return apierr.New(http.StatusConflict, apierr.CodeBankCardInUse, "bank card is used by an active withdrawal")
 	}
 	return nil
 }

@@ -41,6 +41,39 @@ func NewService(pool *pgxpool.Pool, wallets *wallet.Service) *Service {
 	}
 }
 
+// SetWithdrawalPassword 设置或修改取款密码；票面语义不要求校验旧密码。
+func (s *Service) SetWithdrawalPassword(ctx context.Context, customerID int64, raw string) error {
+	hash, err := auth.HashPassword(raw)
+	if err != nil {
+		return fmt.Errorf("hash withdrawal password: %w", err)
+	}
+	if err := s.q.SetWithdrawalPasswordHash(ctx, db.SetWithdrawalPasswordHashParams{
+		ID: customerID, WithdrawalPasswordHash: &hash,
+	}); err != nil {
+		return fmt.Errorf("set withdrawal password: %w", err)
+	}
+	return nil
+}
+
+// CheckWithdrawalPassword 校验取款密码，并区分未设置与不匹配。
+func (s *Service) CheckWithdrawalPassword(ctx context.Context, customerID int64, raw string) error {
+	c, err := s.q.GetCustomerByID(ctx, customerID)
+	if err != nil {
+		return fmt.Errorf("get customer for withdrawal password: %w", err)
+	}
+	if c.WithdrawalPasswordHash == nil {
+		return apierr.New(http.StatusForbidden, apierr.CodeWithdrawalPasswordNotSet, "withdrawal password is not set")
+	}
+	matched, err := auth.VerifyPassword(*c.WithdrawalPasswordHash, raw)
+	if err != nil {
+		return fmt.Errorf("verify withdrawal password: %w", err)
+	}
+	if !matched {
+		return apierr.New(http.StatusForbidden, apierr.CodeWithdrawalPasswordMismatch, "withdrawal password does not match")
+	}
+	return nil
+}
+
 // Register 注册客户：同一事务内写入客户（含邀请关系与祖先路径）与零余额钱包，
 // 并为邀请人总邀请数 +1（注册即计，不论被邀请人是否有效）。
 func (s *Service) Register(ctx context.Context, username, password, inviteCode string) (*db.Customer, error) {
