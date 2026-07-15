@@ -136,7 +136,3 @@ func toWithdrawalOrderItem(order db.WithdrawalOrder) withdrawalOrderItem {
 		PayeeBank: order.PayeeBank, CreatedAt: order.CreatedAt.Time,
 	}
 }
-
-func maskBankCardNo(cardNo string) string {
-	return cardNo[:4] + "****" + cardNo[len(cardNo)-4:]
-}

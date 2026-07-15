@@ -9,19 +9,6 @@ import (
 	"context"
 )
 
-const countActiveWithdrawalsByCard = `-- name: CountActiveWithdrawalsByCard :one
-SELECT count(*) FROM withdrawal_orders
-WHERE bank_card_id = $1
-  AND status IN ('pending_review', 'paying')
-`
-
-func (q *Queries) CountActiveWithdrawalsByCard(ctx context.Context, bankCardID *int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveWithdrawalsByCard, bankCardID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const finalizeWithdrawalOrderNo = `-- name: FinalizeWithdrawalOrderNo :one
 UPDATE withdrawal_orders
 SET order_no = 'W' || id, updated_at = now()
@@ -175,4 +162,24 @@ func (q *Queries) ListWithdrawalOrders(ctx context.Context, arg ListWithdrawalOr
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBankCardForWithdrawal = `-- name: LockBankCardForWithdrawal :one
+SELECT id FROM bank_cards
+WHERE id = $1 AND customer_id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockBankCardForWithdrawalParams struct {
+	ID         int64
+	CustomerID int64
+}
+
+// 建单事务内对卡行加锁并复核未删：与删卡 UPDATE 的行锁互斥，
+// 保证「守卫看到在途单」与「建单看到未删卡」二者必居其一。
+func (q *Queries) LockBankCardForWithdrawal(ctx context.Context, arg LockBankCardForWithdrawalParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockBankCardForWithdrawal, arg.ID, arg.CustomerID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }

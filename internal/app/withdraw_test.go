@@ -103,23 +103,26 @@ func TestWithdrawalCreateFreezesBalanceAndSnapshotsPayee(t *testing.T) {
 	if body["created_at"] == nil {
 		t.Errorf("withdrawal response missing created_at: %v", body)
 	}
-	if got, _ := body["order_no"].(string); !strings.HasPrefix(got, "W") {
-		t.Errorf("order_no = %q, want W prefix", got)
-	}
+	responseOrderNo, _ := body["order_no"].(string)
 
 	available, frozen := walletBalances(t, customerID)
 	if available != balance-amount || frozen != amount {
 		t.Errorf("wallet = (available %d, frozen %d), want (%d, %d)", available, frozen, balance-amount, amount)
 	}
 
-	var passwordHash, status, account, name, bank, bankCode, province, city string
+	var withdrawalID int64
+	var storedOrderNo, passwordHash, status, account, name, bank, bankCode, province, city string
 	if err := testPool.QueryRow(context.Background(),
-		`SELECT c.withdrawal_password_hash, w.status, w.payee_account, w.payee_name, w.payee_bank,
+		`SELECT w.id, w.order_no, c.withdrawal_password_hash, w.status, w.payee_account, w.payee_name, w.payee_bank,
 		        w.payee_bank_code, w.payee_province, w.payee_city
 		 FROM customers c JOIN withdrawal_orders w ON w.customer_id=c.id
 		 WHERE c.id=$1 ORDER BY w.id DESC LIMIT 1`, customerID,
-	).Scan(&passwordHash, &status, &account, &name, &bank, &bankCode, &province, &city); err != nil {
+	).Scan(&withdrawalID, &storedOrderNo, &passwordHash, &status, &account, &name, &bank, &bankCode, &province, &city); err != nil {
 		t.Fatalf("query withdrawal snapshot: %v", err)
+	}
+	wantOrderNo := "W" + strconv.FormatInt(withdrawalID, 10)
+	if responseOrderNo != wantOrderNo || storedOrderNo != wantOrderNo {
+		t.Errorf("order_no response=%q stored=%q, want %q", responseOrderNo, storedOrderNo, wantOrderNo)
 	}
 	if !strings.HasPrefix(passwordHash, "$argon2id$") || passwordHash == "withdraw-secret" {
 		t.Errorf("withdrawal_password_hash = %q, want argon2id hash", passwordHash)
@@ -241,6 +244,7 @@ func TestWithdrawalRejectsUnownedOrDeletedBankCard(t *testing.T) {
 func TestWithdrawalListIsOwnedAndMasksPayeeAccount(t *testing.T) {
 	usernameA := uniqueUsername(t)
 	tokenA := registerAndLogin(t, usernameA)
+	customerA := customerIDOf(t, usernameA)
 	usernameB := uniqueUsername(t)
 	tokenB := registerAndLogin(t, usernameB)
 
@@ -261,6 +265,11 @@ func TestWithdrawalListIsOwnedAndMasksPayeeAccount(t *testing.T) {
 			t.Fatalf("create withdrawal: status = %d, body = %v", resp.StatusCode, body)
 		}
 	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE withdrawal_orders SET status='rejected', reject_reason='卡号有误'
+		 WHERE customer_id=$1`, customerA); err != nil {
+		t.Fatalf("stage rejected withdrawal: %v", err)
+	}
 
 	resp, body := getJSON(t, "/api/v1/withdrawal/orders", tokenA)
 	if resp.StatusCode != http.StatusOK {
@@ -271,8 +280,8 @@ func TestWithdrawalListIsOwnedAndMasksPayeeAccount(t *testing.T) {
 		t.Fatalf("A withdrawal items = %v, want exactly one own order", body["items"])
 	}
 	item := items[0].(map[string]any)
-	if item["status"] != "pending_review" || item["payee_account"] != "6222****0505" {
-		t.Errorf("listed withdrawal = %v, want own pending order with masked account", item)
+	if item["status"] != "rejected" || item["reject_reason"] != "卡号有误" || item["payee_account"] != "6222****0505" {
+		t.Errorf("listed withdrawal = %v, want own rejected order with reason and masked account", item)
 	}
 	if item["payee_name"] != "张三" || item["payee_bank"] != "中国工商银行" {
 		t.Errorf("listed payee snapshot = %v", item)
@@ -300,6 +309,29 @@ func TestWithdrawalActiveOrderGuardsBankCardDelete(t *testing.T) {
 	items, _ := body["items"].([]any)
 	if resp.StatusCode != http.StatusOK || len(items) != 1 {
 		t.Fatalf("card list after rejected delete: status = %d, body = %v", resp.StatusCode, body)
+	}
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE withdrawal_orders SET status='paying' WHERE bank_card_id=$1`, cardID); err != nil {
+		t.Fatalf("stage paying withdrawal: %v", err)
+	}
+	resp, body = doJSON(t, http.MethodDelete, path, token, nil)
+	if resp.StatusCode != http.StatusConflict || body["code"] != "BANK_CARD_IN_USE" {
+		t.Fatalf("delete card used by paying order: status = %d, body = %v", resp.StatusCode, body)
+	}
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE withdrawal_orders SET status='succeeded' WHERE bank_card_id=$1`, cardID); err != nil {
+		t.Fatalf("stage succeeded withdrawal: %v", err)
+	}
+	resp, body = doJSON(t, http.MethodDelete, path, token, nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete card used only by terminal order: status = %d, body = %v", resp.StatusCode, body)
+	}
+	resp, body = getJSON(t, "/api/v1/bank-cards", token)
+	items, _ = body["items"].([]any)
+	if resp.StatusCode != http.StatusOK || len(items) != 0 {
+		t.Fatalf("card list after terminal delete: status = %d, body = %v", resp.StatusCode, body)
 	}
 
 	var account, name, bank string

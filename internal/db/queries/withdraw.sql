@@ -34,7 +34,9 @@ WHERE customer_id = sqlc.arg(customer_id)
 ORDER BY id DESC
 LIMIT sqlc.arg(row_limit);
 
--- name: CountActiveWithdrawalsByCard :one
-SELECT count(*) FROM withdrawal_orders
-WHERE bank_card_id = sqlc.arg(bank_card_id)
-  AND status IN ('pending_review', 'paying');
+-- name: LockBankCardForWithdrawal :one
+-- 建单事务内对卡行加锁并复核未删：与删卡 UPDATE 的行锁互斥，
+-- 保证「守卫看到在途单」与「建单看到未删卡」二者必居其一。
+SELECT id FROM bank_cards
+WHERE id = sqlc.arg(id) AND customer_id = sqlc.arg(customer_id) AND deleted_at IS NULL
+FOR UPDATE;

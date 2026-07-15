@@ -3,11 +3,14 @@ package withdraw
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/netfishx/gabon-go/internal/apierr"
 	"github.com/netfishx/gabon-go/internal/db"
 	"github.com/netfishx/gabon-go/internal/wallet"
 )
@@ -45,10 +48,17 @@ func NewService(pool *pgxpool.Pool, wallets *wallet.Service) *Service {
 func (s *Service) CreateOrder(ctx context.Context, customerID int64, p CreateParams) (db.WithdrawalOrder, error) {
 	var order db.WithdrawalOrder
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if _, err := q.LockBankCardForWithdrawal(ctx, db.LockBankCardForWithdrawalParams{
+			ID: p.BankCardID, CustomerID: customerID,
+		}); errors.Is(err, pgx.ErrNoRows) {
+			return apierr.New(http.StatusNotFound, apierr.CodeBankCardNotFound, "bank card not found")
+		} else if err != nil {
+			return fmt.Errorf("lock bank card for withdrawal: %w", err)
+		}
 		if err := s.wallets.FreezeTx(ctx, tx, customerID, p.Amount); err != nil {
 			return err
 		}
-		q := s.q.WithTx(tx)
 		bankCardID := p.BankCardID
 		bank := p.Payee.Bank
 		id, err := q.InsertWithdrawalOrder(ctx, db.InsertWithdrawalOrderParams{
