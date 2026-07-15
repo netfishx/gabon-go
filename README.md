@@ -1,5 +1,8 @@
 # gabon-go
 
+> **⚠️ 本仓已封存（2026-07-16，只读归档）。**
+> Go 重写于 M6 中止，经验已沉淀为跨语言传承包 **[gabon-knowledge](https://github.com/netfishx/gabon-knowledge)**（领域真源逐字迁移 + 资金语义/裁决史蒸馏，证据锚 `5dd42d8c`）；后续重写走 Rust，以传承包为起点。资产去向逐项见[验收覆盖矩阵](https://github.com/netfishx/gabon-knowledge/blob/main/coverage-matrix.md)；封存执行见[终结分类票](https://github.com/netfishx/gabon-knowledge/issues/10)。
+
 旧版 gabon（Java 17 / Spring Boot 3.2 / MySQL / Redis）的 **Go 全量重写**。定位是**候选替代品**：验证可行即替换旧版接管现网——无 API/schema 兼容义务（调用方配合修改），但质量按生产标准，schema 不关闭数据迁移之门（ADR-0002 及其修正）。
 
 ## 产品一句话
