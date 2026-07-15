@@ -173,7 +173,9 @@ func (q *Queries) InsertRechargeOrder(ctx context.Context, arg InsertRechargeOrd
 
 const listExpiredPendingRecharges = `-- name: ListExpiredPendingRecharges :many
 SELECT id, order_no, customer_id, amount, fiat_amount, currency, payment_method, provider, provider_order_no, provider_status, status, failure_code, failure_reason, expires_at, completed_at, created_at, updated_at FROM recharge_orders
-WHERE status = 'pending_payment' AND expires_at < now()
+WHERE status = 'pending_payment'
+  AND expires_at < now()
+  AND failure_code IS NULL
 ORDER BY id
 LIMIT $1
 `
@@ -268,6 +270,29 @@ func (q *Queries) ListRechargeOrders(ctx context.Context, arg ListRechargeOrders
 	return items, nil
 }
 
+const markRechargeAmountMismatch = `-- name: MarkRechargeAmountMismatch :execrows
+UPDATE recharge_orders
+SET failure_code = 'amount_mismatch',
+    failure_reason = $1,
+    updated_at = now()
+WHERE id = $2
+  AND status = 'pending_payment'
+  AND failure_code IS NULL
+`
+
+type MarkRechargeAmountMismatchParams struct {
+	Reason *string
+	ID     int64
+}
+
+func (q *Queries) MarkRechargeAmountMismatch(ctx context.Context, arg MarkRechargeAmountMismatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markRechargeAmountMismatch, arg.Reason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markRechargeCancelled = `-- name: MarkRechargeCancelled :one
 UPDATE recharge_orders
 SET status = 'cancelled',
@@ -352,6 +377,8 @@ const markRechargeSucceeded = `-- name: MarkRechargeSucceeded :one
 UPDATE recharge_orders
 SET status = 'succeeded',
     provider_status = $1,
+    failure_code = NULL,
+    failure_reason = NULL,
     completed_at = now(),
     updated_at = now()
 WHERE id = $2 AND status = 'pending_payment'

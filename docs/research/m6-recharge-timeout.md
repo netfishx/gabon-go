@@ -32,3 +32,9 @@
 - **超时取消前先查账**：复刻"先调 Provider.query 查单，仍 pending_payment 才取消"，避免误杀在途到账。
 - **状态命名**：新版用 `pending_payment/succeeded/failed/cancelled`（schema 基线 recharge_order_status），语义对齐旧版 PROCESSING/SUCCESS/FAILED/CANCELLED。
 - **竞态**：新版一律条件 UPDATE（`WHERE status='pending_payment'`）翻转，堵旧版盲更新的窗口——延续 M4/M5 的锁行/条件 UPDATE 范式。
+
+## 新版差异注记
+
+本文第 3 点记录的是旧版行为：查账失败会累加 `retryCount`，随后照常取消。新版有意不复刻该策略：按 #66 票面与 #75 裁决，查账失败或无法取得可信渠道结论时先重试，以订单 `expires_at` 为基准保留 24 小时时间宽限，超过宽限后才兜底取消；时间宽限取代次数计数。
+
+查账成功但金额不符的充值单永不由清扫自动推进终态。新版将其标记为 `failure_code='amount_mismatch'` 并排除后续清扫，留待 #77 的人工处理通道；迟到的金额正确成功回调仍可正常结算并清除标记。
