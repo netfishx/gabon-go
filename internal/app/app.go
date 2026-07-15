@@ -29,6 +29,7 @@ import (
 	"github.com/netfishx/gabon-go/internal/video"
 	"github.com/netfishx/gabon-go/internal/vip"
 	"github.com/netfishx/gabon-go/internal/wallet"
+	"github.com/netfishx/gabon-go/internal/withdraw"
 )
 
 // Bootstrap 一次性启动动作：admins 表为空时创建初始管理员。迁移之后、服务启动之前调用。
@@ -98,6 +99,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 	}
 	payments := payment.NewService(pool, wallets, registry, cfg.CallbackBaseURL, cfg.RechargeTimeout)
 	bankCards := bankcard.NewService(pool)
+	withdraws := withdraw.NewService(pool, wallets)
 	videoSvc := video.NewService(pool, store)
 	// 有效用户判定挂视频审核通过处（同事务）；依赖方向约束（video ↛ customer）以回调解耦
 	videoSvc.OnApproved = func(ctx context.Context, tx pgx.Tx, authorID int64) error {
@@ -117,6 +119,7 @@ func New(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (*App, err
 		Ads:       ads,
 		Payments:  payments,
 		BankCards: bankCards,
+		Withdraws: withdraws,
 		Store:     store,
 		CDNBase:   cfg.CDNBaseURL,
 	}

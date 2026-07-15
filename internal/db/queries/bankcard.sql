@@ -9,6 +9,16 @@ SELECT * FROM bank_cards
 WHERE customer_id = sqlc.arg(customer_id) AND deleted_at IS NULL
 ORDER BY id DESC;
 
+-- name: GetOwnedBankCard :one
+SELECT * FROM bank_cards
+WHERE id = sqlc.arg(id) AND customer_id = sqlc.arg(customer_id) AND deleted_at IS NULL;
+
 -- name: SoftDeleteBankCard :execrows
 UPDATE bank_cards SET deleted_at = now(), updated_at = now()
-WHERE id = sqlc.arg(id) AND customer_id = sqlc.arg(customer_id) AND deleted_at IS NULL;
+WHERE bank_cards.id = sqlc.arg(id)
+  AND bank_cards.customer_id = sqlc.arg(customer_id)
+  AND bank_cards.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM withdrawal_orders w
+      WHERE w.bank_card_id = bank_cards.id AND w.status IN ('pending_review', 'paying')
+  );

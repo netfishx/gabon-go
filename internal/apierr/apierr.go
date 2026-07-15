@@ -59,7 +59,11 @@ const (
 
 	CodeRechargeMethodUnsupported = "RECHARGE_METHOD_UNSUPPORTED"
 
+	CodeWithdrawalPasswordNotSet   = "WITHDRAWAL_PASSWORD_NOT_SET"
+	CodeWithdrawalPasswordMismatch = "WITHDRAWAL_PASSWORD_MISMATCH"
+
 	CodeBankCardNotFound = "BANK_CARD_NOT_FOUND"
+	CodeBankCardInUse    = "BANK_CARD_IN_USE"
 )
 
 // Error 是全 API 统一的业务错误：HTTP status 承载大类，Code 承载细类。
